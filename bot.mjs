@@ -1,5 +1,5 @@
 // =========================================================================
-// 🤖 TIPNI TO! - TRVALÝ STAVOVÝ BACKEND DAEMON V2.3.0 (bot.mjs)
+// 🤖 TIPNI TO! - TRVALÝ STAVOVÝ BACKEND DAEMON V2.4.0 (bot.mjs)
 // =========================================================================
 import admin from "firebase-admin";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -142,43 +142,43 @@ function inicializujLiveFirestoreStreams() {
                       bonusy: soutezData.bonusy || {}
                   };
               }
-              rekonstruujAgregaty();
           });
-      }, (err) => console.error("❌ Kritický výpadek streamu sezón:", err));
+          // 👑 FIREWALL PROTI PŘETÍŽENÍ: Přepočet odpalujeme až PO dokončení celého cyklu, nikoli uvnitř forEach!
+          rekonstruujAgregaty();
+      }, (err) => console.error("❌ Kritický výpadek databázového streamu sezón:", err));
 
-    // 👑 NEPRŮSTŘELNÝ JIŠTIČ ŽEBŘÍČKU: Bot nyní poslouchá zápasy přímo z Firestore jako frontend!
-    console.log(`⚽ Ladím permanentní stream zápasů z Firestore pro ligu: ${LEAGUE_NAME}...`);
+    console.log(`📡 Spouštím permanentní synchronizaci zápasů pro Admin Panel...`);
     db.collection("ligy").doc(LEAGUE_NAME).collection("zapasy").onSnapshot(snapshot => {
         snapshot.docChanges().forEach(change => {
             const matchId = change.doc.id;
-            const data = change.doc.data() || {};
-            
             if (change.type === "removed") {
                 delete RAM_CENTRAL_MATCHES[matchId];
             } else {
-                const stary = RAM_CENTRAL_MATCHES[matchId] || {};
+                const matchData = change.doc.data();
                 
-                // Konverze Firestore datumu na ISO string pro bezpečný parsing kdekoli
-                let isoDatum = stary.datum || new Date().toISOString();
-                if (data.datum) {
-                    isoDatum = typeof data.datum.toDate === 'function' ? data.datum.toDate().toISOString() : new Date(data.datum).toISOString();
+                // Převod Firebase Timestampu na ISO string pro zachování kompatibility
+                let datumIso = new Date().toISOString();
+                if (matchData.datum) {
+                    datumIso = typeof matchData.datum.toDate === "function" 
+                        ? matchData.datum.toDate().toISOString() 
+                        : new Date(matchData.datum).toISOString();
                 }
 
                 RAM_CENTRAL_MATCHES[matchId] = {
-                    domaci: data.domaci || stary.domaci || "Neznámý",
-                    hoste: data.hoste || stary.hoste || "Neznámý",
-                    datum: isoDatum,
-                    isPlayoff: data.isPlayoff !== undefined ? data.isPlayoff : (stary.isPlayoff || false),
-                    kolo: data.kolo || stary.kolo || "Šampionát",
-                    vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : stary.vysledek_domaci,
-                    vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : stary.vysledek_hoste,
-                    apiStatus: data.apiStatus || stary.apiStatus || "SCHEDULED",
-                    postup: data.postup || stary.postup || ""
+                    domaci: matchData.domaci || "Neznámý",
+                    hoste: match定期 || match.hoste || "Neznámý",
+                    datum: inputDatumIso || match.datum || new Date().toISOString(),
+                    isPlayoff: match.isPlayoff || false,
+                    kolo: match.kolo || "Šampionát",
+                    vysledek_domaci: match.vysledek_domaci,
+                    vysledek_hoste: match.vysledek_hoste,
+                    apiStatus: match.apiStatus || "FINISHED",
+                    postup: match.postup || ""
                 };
             }
         });
         rekonstruujAgregaty();
-    }, (err) => console.error("❌ Kritický výpadek streamu zápasů z Firestore:", err));
+    }, (err) => console.error("❌ Chyba streamu zápasů:", err));
 }
 
 // --- 🧮 AGREGÁTOR PAMĚTI ---
@@ -429,7 +429,26 @@ async function providniApiHeartbeat() {
     }
 }
 
-// --- START DAEMONA ---
-console.log("👑 TRVALÝ STAVOVÝ BACKEND BOT STARTUJE...");
-inicializujLiveFirestoreStreams();
-setTimeout(providniApiHeartbeat, 4000);
+// --- 🌐 LIFECYCLE INITIALIZATION BOOTSTRAP ---
+async function startEnterpriseApplication() {
+    console.log("=========================================================================");
+    console.log("👑 CLOUD-NATIVE DAEMON: Inicializuji životní cyklus trvalého mozku...");
+    console.log("=========================================================================");
+
+    // 1. Spustíme integrovaný Health Check Server pro Render
+    http.createServer((req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("OK - Backend mozek hlídá stadion.");
+    }).listen(PORT, () => {
+        console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen a připraven pro Render.`);
+    });
+
+    // 2. Připojíme dlouhoběžící vnitřní Firestore streamy
+    inicializujLiveFirestoreStreams();
+
+    // 3. Spustíme API heartbeat radar po krátké úvodní pauze
+    setTimeout(providniApiHeartbeat, 4000);
+}
+
+// Odpálení aplikace
+startEnterpriseApplication();
