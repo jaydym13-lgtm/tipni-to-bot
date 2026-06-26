@@ -1,19 +1,20 @@
 // =========================================================================
-// 🤖 TIPNI TO! - TRVALÝ STAVOVÝ BACKEND DAEMON V2.0.0 (bot.mjs)
+// 🤖 TIPNI TO! - TRVALÝ STAVOVÝ BACKEND DAEMON V2.2.0 (bot.mjs)
 // =========================================================================
 import admin from "firebase-admin";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import process from "process";
-import fetch from "node-fetch"; // Ujisti se, že pro starší Node verze je fetch dostupný, v Node 24 je nativní
+import http from "http";
 
-// --- ⚙️ KONFIGURACE PROSTŘEDÍ (Koyeb / VPS Environment Variables) ---
+// --- ⚙️ PROSTŘEDÍ A KONFIGURACE (Environment Variables) ---
 const LEAGUE_ID = process.env.LEAGUE_ID || "WC";
 const LEAGUE_NAME = process.env.LEAGUE_NAME || "MS ve fotbale";
 const SEZONA_ID = "2025_2026";
 const LIGA_KLIC = LEAGUE_NAME.replace(/ /g, "_");
 const API_KEY = process.env.FOOTBALL_DATA_API_KEY;
+const PORT = process.env.PORT || 8080;
 
-// Cloudflare R2 Připojení přes AWS S3 Standard SDK
+// Inicializace Cloudflare R2 Klienta přes AWS S3 SDK
 const r2Client = new S3Client({
     region: "auto",
     endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -31,13 +32,13 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-// --- 🧠 IN-MEMORY RAM STATE (Trvalá vnitřní paměť bota) ---
-const RAM_USERS_PROFILES = {}; // uid -> { email, nickname }
-const RAM_USERS_TIPS = {};     // uid -> { tipy: {}, bonusy: {} }
-const RAM_CENTRAL_MATCHES = {};// matchId -> { data zápasu }
-const PROCESSED_FREEZE_MATCHES = new Set(); // ID zápasů s uzamčenými tipy
+// --- 🧠 IN-MEMORY RAM STATE (Stavová paměť daemona) ---
+const RAM_USERS_PROFILES = {}; 
+const RAM_USERS_TIPS = {};     
+const RAM_CENTRAL_MATCHES = {};
+const PROCESSED_FREEZE_MATCHES = new Set(); 
 
-// 🇨🇿 SLOVNÍK TÝMŮ PRO AUTONOMNÍ PŘEKLAD Z API
+// Slovník pro autonomní překlad týmů ze sportovního API
 const slovnikTymu = {
     "Czech Republic": "Česko", "Czechia": "Česko", "Mexico": "Mexiko",
     "South Korea": "Jižní Korea", "Korea Republic": "Jižní Korea", "South Africa": "JAR",
@@ -84,37 +85,22 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
     return 0;
 };
 
-// 📤 POMOCNÝ MANAGER PRO ROZVOZ SOUBORŮ DO R2 A PURGE CLOUDFLARE CACHE
-async function uploadToR2AndPurge(filename, jsonData) {
+// --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD) ---
+async function uploadToR2(filename, jsonData) {
     try {
         const bodyText = JSON.stringify(jsonData, null, 2);
-        
-        // 1. Nahrání na R2 přes AWS SDK
         await r2Client.send(new PutObjectCommand({
             Bucket: BUCKET_NAME,
             Key: filename,
             Body: bodyText,
             ContentType: "application/json"
         }));
-
-        // 2. Volitelný proplach Cloudflare cache, pokud jsou nastaveny tokeny
-        if (process.env.CLOUDFLARE_ZONE_ID && process.env.CLOUDFLARE_API_TOKEN) {
-            const fileUrl = `https://pub-03310472e0f0459ab78ec11236373cd6.r2.dev/${filename}`;
-            await fetch(`https://api.cloudflare.com/client/v4/zones/${process.env.CLOUDFLARE_ZONE_ID}/purge_cache`, {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ files: [fileUrl] })
-            }).catch(() => {});
-        }
     } catch (err) {
-        console.error(`❌ Chyba distribuce souboru ${filename}:`, err);
+        console.error(`❌ Chyba distribuce souboru ${filename} do R2:`, err);
     }
 }
 
-// 📡 ULTRA ÚSPORNÉ FIRESTORE STREAMY (Jen 1 spojení do RAM)
+// --- 📡 DATA PIPELINES (Firestore Real-time Sync) ---
 function inicializujLiveFirestoreStreams() {
     console.log("👥 Spouštím permanentní RAM synchronizaci uživatelských účtů...");
     
@@ -137,11 +123,16 @@ function inicializujLiveFirestoreStreams() {
         });
     });
 
-    db.collectionGroup("sezony").where(admin.firestore.FieldPath.documentId(), "==", SEZONA_ID)
-      .onSnapshot(snapshot => {
+    // 👑 REAKTOR BEZ CHYBY: Odstranili jsme kousavý .where() filtr z databáze
+    console.log(`🪐 Ladím rádiový in-memory stream pro všechny sezónní monolity...`);
+    db.collectionGroup("sezony").onSnapshot(snapshot => {
           snapshot.docChanges().forEach(change => {
+              // Filtraci na aktivní herní sezónu provedeme bezpečně v paměti RAM
+              if (change.doc.id !== SEZONA_ID) return;
+              
               if (!change.doc.ref.parent || !change.doc.ref.parent.parent) return;
               const uid = change.doc.ref.parent.parent.id;
+              
               if (change.type === "removed") {
                   delete RAM_USERS_TIPS[uid];
               } else {
@@ -156,10 +147,10 @@ function inicializujLiveFirestoreStreams() {
               }
               rekonstruujAgregaty();
           });
-      });
+      }, (err) => console.error("❌ Kritický výpadek databázového streamu sezón:", err));
 }
 
-// --- 🧮 PAMĚŤOVÁ KUCHYNĚ ---
+// --- 🧮 AGREGÁTOR PAMĚTI ---
 async function rekonstruujAgregaty(forceWriteHistory = false) {
     const timestampNow = new Date().toISOString();
     const leagueDoc = await db.collection("ligy").doc(LEAGUE_NAME).get().catch(() => null);
@@ -275,10 +266,10 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         textRekordmaniKola: rekordmaniKola.length > 0 ? `${rekordmaniKola.join(', ')} (${maxBoduKoloGlobal} b.)` : '–',
         aktualizovano: timestampNow
     };
-    await uploadToR2AndPurge("leaderboard.json", leaderboardJson);
+    await uploadToR2("leaderboard.json", leaderboardJson);
 
     const rozpisJson = { zapasyMapa: RAM_CENTRAL_MATCHES, aktualizovano: timestampNow };
-    await uploadToR2AndPurge("rozpis.json", rozpisJson);
+    await uploadToR2("rozpis.json", rozpisJson);
 
     if (forceWriteHistory) {
         for (const uid of Object.keys(RAM_USERS_PROFILES)) {
@@ -293,13 +284,13 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
             });
 
             const historieJson = { mapaTipu: hracovyTipyOdemcene, vytvoreno: timestampNow };
-            await uploadToR2AndPurge(`historie_hrace_${uid}.json`, historieJson);
+            await uploadToR2(`historie_hrace_${uid}.json`, historieJson);
         }
     }
 }
 
 // --- ⏱️ HEARTBEAT MANAGER (Sledování API & Dynamický spánek) ---
-async function heartbeat() {
+async function providniApiHeartbeat() {
     console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Heartbeat kontrola sportovního API...`);
     if (!API_KEY) {
         console.error("❌ Chybí FOOTBALL_DATA_API_KEY!");
@@ -372,7 +363,7 @@ async function heartbeat() {
                     }
                 });
 
-                await uploadToR2AndPurge(`spy_zapas_${apiId}.json`, { tipy: tipyProZapasPole, aktualizovano: nyni.toISOString() });
+                await uploadToR2(`spy_zapas_${apiId}.json`, { tipy: tipyProZapasPole, aktualizovano: nyni.toISOString() });
                 PROCESSED_FREEZE_MATCHES.add(apiId);
                 dosloKStavoveZmene = true;
             }
@@ -390,25 +381,45 @@ async function heartbeat() {
         }
 
         if (dosloKStavoveZmene || obsahujeAktivniZapas) {
+            console.log("⚡ Detekována herní aktivita nebo změna skóre. Přepočítávám RAM registry...");
             await rekonstruujAgregaty(dosloKStavoveZmene);
         }
 
         // ⏱️ DYNAMICKÝ MANAGMENT SPÁNKU
         if (obsahujeAktivniZapas) {
             console.log("🏃 Hraje se! Sleduji live skóre každou 1 minutu.");
-            setTimeout(heartbeat, 60000); 
+            setTimeout(providniApiHeartbeat, 60000); 
         } else {
             console.log("💤 Žádný zápas zrovna neběží. Bot šetří API a usíná na 15 minut.");
-            setTimeout(heartbeat, 15 * 60 * 1000); 
+            setTimeout(providniApiHeartbeat, 15 * 60 * 1000); 
         }
 
     } catch (err) {
         console.error("❌ Chyba v heartbeat smyčce, zkouším za minutu:", err);
-        setTimeout(heartbeat, 60000);
+        setTimeout(providniApiHeartbeat, 60000);
     }
 }
 
-// --- START DAEMONA ---
-console.log("👑 TRVALÝ STAVOVÝ BACKEND BOT STARTUJE...");
-inicializujLiveFirestoreStreams();
-setTimeout(heartbeat, 4000); // 4 vteřiny pauza na úvodní nasosání snapshotů z databáze do RAM
+// --- 🌐 LIFECYCLE INITIALIZATION BOOTSTRAP ---
+async function startEnterpriseApplication() {
+    console.log("=========================================================================");
+    console.log("👑 CLOUD-NATIVE DAEMON: Inicializuji životní cyklus trvalého mozku...");
+    console.log("=========================================================================");
+
+    // 1. Spustíme integrovaný Health Check Server pro Render
+    http.createServer((req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("OK - Backend mozek hlídá stadion.");
+    }).listen(PORT, () => {
+        console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen a připraven pro Render.`);
+    });
+
+    // 2. Připojíme dlouhoběžící vnitřní Firestore streamy
+    inicializujLiveFirestoreStreams();
+
+    // 3. Spustíme API heartbeat radar po krátké úvodní pauze
+    setTimeout(providniApiHeartbeat, 4000);
+}
+
+// Odpálení aplikace
+startEnterpriseApplication();
