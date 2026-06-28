@@ -38,6 +38,13 @@ const RAM_USERS_TIPS = {};
 const RAM_CENTRAL_MATCHES = {};
 const PROCESSED_FREEZE_MATCHES = new Set(); 
 
+// 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
+const RAM_BOT_CONFIG = {
+    active: true,         // Hlavní nouzový vypínač bota
+    liveInterval: 3,      // Tvoje zvolené 3 minuty pro tahání live skóre během hry
+    waitInterval: 10      // Tvoje zvolených 10 minut pro čekání těsně před hrou
+};
+
 // Slovník pro autonomní překlad týmů ze sportovního API
 const slovnikTymu = {
     "Czech Republic": "Česko", "Czechia": "Česko", "Mexico": "Mexiko",
@@ -103,6 +110,17 @@ async function uploadToR2(filename, jsonData) {
 // --- 📡 DATA PIPELINES (Firestore Real-time Sync) ---
 function inicializujLiveFirestoreStreams() {
     console.log("👥 Spouštím permanentní RAM synchronizaci uživatelských účtů...");
+
+    // 🎛️ ŽIVÝ RADAR PRO OVLÁDÁNÍ BOTA (Nonstop naslouchá tvému Super Admin panelu bez nutnosti restartu)
+    db.collection("system").doc("bot_config").onSnapshot(doc => {
+        if (doc.exists) {
+            const data = doc.data();
+            RAM_BOT_CONFIG.active = data.active !== undefined ? data.active : true;
+            RAM_BOT_CONFIG.liveInterval = parseInt(data.liveInterval) || 3;
+            RAM_BOT_CONFIG.waitInterval = parseInt(data.waitInterval) || 10;
+            console.log("🎛️ SYSTEM PANEL CONFIG AKTUALIZOVÁN V RAM:", RAM_BOT_CONFIG);
+        }
+    }, err => console.error("❌ Chyba streamu ovládání bota ze Super Admin panelu:", err));
     
     db.collection("users").onSnapshot(snapshot => {
         snapshot.docChanges().forEach(change => {
@@ -318,9 +336,16 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
     }
 }
 
-// --- ⏱️ HEARTBEAT MANAGER (Sledování API & Dynamický spánek) ---
 async function providniApiHeartbeat() {
     console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Heartbeat kontrola sportovního API...`);
+    
+    // ⛔ BEZPEČNOSTNÍ STOPKA ZE SUPER ADMIN PANELU
+    if (!RAM_BOT_CONFIG.active) {
+        console.log("⛔ BOT MANUÁLNĚ VYPNUT: Ovládací panel hlásí force_stop. Spím a nezatěžuji API...");
+        setTimeout(providniApiHeartbeat, RAM_BOT_CONFIG.waitInterval * 60 * 1000);
+        return;
+    }
+
     if (!API_KEY) {
         console.log("ℹ️ Běží čistě Firestore režim (Chybí API_KEY, sportovní API přeskočeno).");
         return;
@@ -338,11 +363,17 @@ async function providniApiHeartbeat() {
 
         let obsahujeAktivniZapas = false;
         let dosloKStavoveZmene = false;
+        let minRozdilDoZapasu = Infinity; // Sledování minut do nejbližšího výkopu
 
         for (const match of matches) {
             const apiId = String(match.id);
             const status = match.status;
             const matchStarted = new Date(match.utcDate) <= nyni;
+            const rozdilMinut = (new Date(match.utcDate) - nyni) / (1000 * 60);
+
+            if (rozdilMinut > 0 && rozdilMinut < minRozdilDoZapasu) {
+                minRozdilDoZapasu = rozdilMinut;
+            }
 
             const rawDomaci = match.homeTeam?.name || "Neznámý";
             const rawHoste = match.awayTeam?.name || "Neznámý";
@@ -372,9 +403,9 @@ async function providniApiHeartbeat() {
                 obsahujeAktivniZapas = true;
             }
 
-            // --- 🔒 JISTIČ TIPOVACÍ BOUŘE: Výkop zápasu ---
+            // --- 🔒 JISTIČ TIPOVACÍ BOUŘE: Výkop zápasu (T-0 minut chirurgicky přesně) ---
             if (matchStarted && !PROCESSED_FREEZE_MATCHES.has(apiId)) {
-                console.log(`🔒 LOCK: Výkop zápasu ${domaci} – ${hoste}. Zmrazuji tipy.`);
+                console.log(`🔒 LOCK T-0: Právě nastal čas výkopu zápasu ${domaci} – ${hoste}. Zmrazuji tipy!`);
                 
                 const tipyProZapasPole = [];
                 Object.keys(RAM_USERS_PROFILES).forEach(uid => {
@@ -414,27 +445,27 @@ async function providniApiHeartbeat() {
             await rekonstruujAgregaty(dosloKStavoveZmene);
         }
 
-        if (obsahujeAktivniZapas) {
-            // Pokud zápas na stadionu běží, bušíme do API každou minutu
-            setTimeout(providniApiHeartbeat, 60000); 
-        } else {
-            // 🧠 INTELIGENTNÍ SEBEOBRANA: Pokud zápas neběží, podíváme se, jestli dnes ještě něco nezačíná do 35 minut
-            let jeDalsiZapasBlizko = false;
-            for (const match of matches) {
-                const rozdilMinut = (new Date(match.utcDate) - nyni) / (1000 * 60);
-                if (rozdilMinut > 0 && rozdilMinut <= 35) {
-                    jeDalsiZapasBlizko = true;
-                    break;
-                }
-            }
+        // ⏱️ INTELEKTUÁLNÍ MANAŽER ČASOVÁNÍ (Matematické provázání 6 -> 3 -> 0 -> Zámek)
+        const jeZapasV_OkneBojovehoRezimu = minRozdilDoZapasu <= 6; // Spínáme přesně 6 minut před zápasem
 
-            if (jeDalsiZapasBlizko) {
-                console.log("⏳ Blíží se další zápas v krátkém okně. Držím smyčku bdělou a zkontroluji situaci za 5 minut...");
-                setTimeout(providniApiHeartbeat, 5 * 60 * 1000); 
+        if (obsahujeAktivniZapas || jeZapasV_OkneBojovehoRezimu) {
+            console.log(`🚀 BATTLE MODE: Tikám na ostro každé ${RAM_BOT_CONFIG.liveInterval} minuty.`);
+            setTimeout(providniApiHeartbeat, RAM_BOT_CONFIG.liveInterval * 60 * 1000);
+        } else {
+            // Vyčkávací režim (Když je zápas ještě daleko)
+            if (minRozdilDoZapasu <= 35) {
+                const casDoBojovehoRezimu = minRozdilDoZapasu - 6;
+                // MATEMATICKÝ ZÁCHYTNÝ JISTIČ: Pokud by standardní spánek přeletěl start T-6 minut,
+                // zkrátíme vteřinově spánek bota tak, aby trefil přesně značku 6 minut před výkopem!
+                const finalniSpanekMinut = (casDoBojovehoRezimu > 0 && casDoBojovehoRezimu < RAM_BOT_CONFIG.waitInterval) 
+                    ? casDoBojovehoRezimu 
+                    : RAM_BOT_CONFIG.waitInterval;
+
+                console.log(`⏳ ČEKÁNÍ: Zápas je blízko. Další kontrola situace přesně za ${Math.round(finalniSpanekMinut)} minut.`);
+                setTimeout(providniApiHeartbeat, finalniSpanekMinut * 60 * 1000);
             } else {
-                console.log("💤 Na stadionech je kompletní klid. Ukončuji heartbeat smyčku a odcházím spát. Chronos mě včas probudí.");
-                // 🛑 KLÍČOVÝ MOMENT: Nespustíme ŽÁDNÝ další setTimeout. Smyčka dobrovolně umírá. 
-                // Bot do 15 minut kompletně usne (spin down) a uvolní systémové prostředky.
+                console.log("💤 KLID ZBRANÍ: Dnes už nic blízkého nezačíná. Vypínám smyčku, Chronos mě včas probudí.");
+                // Smyčka končí, Render bota uspí do hlubokého spánku
             }
         }
 
