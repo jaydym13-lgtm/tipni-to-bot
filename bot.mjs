@@ -415,9 +415,27 @@ async function providniApiHeartbeat() {
         }
 
         if (obsahujeAktivniZapas) {
+            // Pokud zápas na stadionu běží, bušíme do API každou minutu
             setTimeout(providniApiHeartbeat, 60000); 
         } else {
-            setTimeout(providniApiHeartbeat, 15 * 60 * 1000); 
+            // 🧠 INTELIGENTNÍ SEBEOBRANA: Pokud zápas neběží, podíváme se, jestli dnes ještě něco nezačíná do 35 minut
+            let jeDalsiZapasBlizko = false;
+            for (const match of matches) {
+                const rozdilMinut = (new Date(match.utcDate) - nyni) / (1000 * 60);
+                if (rozdilMinut > 0 && rozdilMinut <= 35) {
+                    jeDalsiZapasBlizko = true;
+                    break;
+                }
+            }
+
+            if (jeDalsiZapasBlizko) {
+                console.log("⏳ Blíží se další zápas v krátkém okně. Držím smyčku bdělou a zkontroluji situaci za 5 minut...");
+                setTimeout(providniApiHeartbeat, 5 * 60 * 1000); 
+            } else {
+                console.log("💤 Na stadionech je kompletní klid. Ukončuji heartbeat smyčku a odcházím spát. Chronos mě včas probudí.");
+                // 🛑 KLÍČOVÝ MOMENT: Nespustíme ŽÁDNÝ další setTimeout. Smyčka dobrovolně umírá. 
+                // Bot do 15 minut kompletně usne (spin down) a uvolní systémové prostředky.
+            }
         }
 
     } catch (err) {
