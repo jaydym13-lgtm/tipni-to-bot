@@ -395,15 +395,17 @@ async function providniApiHeartbeat() {
             let golyDomaci = undefined; let golyHoste = undefined; let postupVal = "";
             const jeZapasAktivni = status === "FINISHED" || status === "IN_PLAY" || status === "PAUSED";
             
-            if (jeZapasAktivni && match.score?.fullTime?.home !== null) {
-                if (isPlayoff && match.score.regularTime?.home !== null) {
+            // 🛡️ PARSER SKÓRE: Pojistíme každý jeden krok. Pokud API u neodehraného zápasu nepošle score, 
+            // JavaScript s otazníky nespadne, bezpečně to přeskočí a bot může v klidu běžet dál.
+            if (jeZapasAktivni && match.score && match.score.fullTime && match.score.fullTime.home !== null) {
+                if (isPlayoff && match.score.regularTime && match.score.regularTime.home !== null) {
                     golyDomaci = parseInt(match.score.regularTime.home);
                     golyHoste = parseInt(match.score.regularTime.away);
                 } else {
                     golyDomaci = parseInt(match.score.fullTime.home);
                     golyHoste = parseInt(match.score.fullTime.away);
                 }
-                if (isPlayoff) {
+                if (isPlayoff && match.score.winner) {
                     if (match.score.winner === "HOME_TEAM") postupVal = "domaci";
                     if (match.score.winner === "AWAY_TEAM") postupVal = "hoste";
                 }
