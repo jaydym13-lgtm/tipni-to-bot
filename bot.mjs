@@ -41,8 +41,8 @@ const PROCESSED_FREEZE_MATCHES = new Set();
 // 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
 const RAM_BOT_CONFIG = {
     active: true,         // Hlavní nouzový vypínač bota
-    liveInterval: 3,      // Tvoje zvolené 3 minuty pro tahání live skóre během hry
-    waitInterval: 10      // Tvoje zvolených 10 minut pro čekání těsně před hrou
+    liveInterval: 3,      // Tvoje zvolené 3 minuty pro live skóre
+    waitInterval: 10      // Tvoje zvolených 10 minut pro čekání
 };
 
 // Slovník pro autonomní překlad týmů ze sportovního API
@@ -111,7 +111,7 @@ async function uploadToR2(filename, jsonData) {
 function inicializujLiveFirestoreStreams() {
     console.log("👥 Spouštím permanentní RAM synchronizaci uživatelských účtů...");
 
-    // 🎛️ ŽIVÝ RADAR PRO OVLÁDÁNÍ BOTA (Nonstop naslouchá tvému Super Admin panelu bez nutnosti restartu)
+    // 🎛️ ŽIVÝ RADAR PRO OVLÁDÁNÍ BOTA (Bleskově naslouchá tvému Super Admin panelu bez restartů)
     db.collection("system").doc("bot_config").onSnapshot(doc => {
         if (doc.exists) {
             const data = doc.data();
@@ -120,7 +120,7 @@ function inicializujLiveFirestoreStreams() {
             RAM_BOT_CONFIG.waitInterval = parseInt(data.waitInterval) || 10;
             console.log("🎛️ SYSTEM PANEL CONFIG AKTUALIZOVÁN V RAM:", RAM_BOT_CONFIG);
         }
-    }, err => console.error("❌ Chyba streamu ovládání bota ze Super Admin panelu:", err));
+    }, err => console.error("❌ Chyba streamu ovládání bota:", err));
     
     db.collection("users").onSnapshot(snapshot => {
         snapshot.docChanges().forEach(change => {
@@ -339,10 +339,18 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
 async function providniApiHeartbeat() {
     console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Heartbeat kontrola sportovního API...`);
     
-    // ⛔ BEZPEČNOSTNÍ STOPKA ZE SUPER ADMIN PANELU
     if (!RAM_BOT_CONFIG.active) {
         console.log("⛔ BOT MANUÁLNĚ VYPNUT: Ovládací panel hlásí force_stop. Spím a nezatěžuji API...");
         setTimeout(providniApiHeartbeat, RAM_BOT_CONFIG.waitInterval * 60 * 1000);
+        return;
+    }
+
+    // 🧠 ULTRA-PROFI ASYNCHRONNÍ ZÁVORA (Tvůj skvělý nápad bez magických časovačů):
+    // Pokud jsou registry prázdné, síť ještě nedokončila prvotní nasátí celého Firestore.
+    // Bot okamžitě stornuje výpočet a bezpečně odloží start, dokud paměť RAM nebude prokazatelně 100% nasycená.
+    if (Object.keys(RAM_USERS_PROFILES).length === 0 || Object.keys(RAM_USERS_TIPS).length === 0) {
+        console.log("⏳ ASYNCHRONNÍ ZÁVORA: Čekám na dokončení stahování dat z Firebase...");
+        setTimeout(providniApiHeartbeat, 2000);
         return;
     }
 
@@ -363,7 +371,7 @@ async function providniApiHeartbeat() {
 
         let obsahujeAktivniZapas = false;
         let dosloKStavoveZmene = false;
-        let minRozdilDoZapasu = Infinity; // Sledování minut do nejbližšího výkopu
+        let minRozdilDoZapasu = Infinity;
 
         for (const match of matches) {
             const apiId = String(match.id);
@@ -380,7 +388,6 @@ async function providniApiHeartbeat() {
             const domaci = slovnikTymu[rawDomaci] || rawDomaci;
             const hoste = slovnikTymu[rawHoste] || rawHoste;
             const isPlayoff = match.stage !== "GROUP_STAGE";
-            const kolo = match.matchday ? `Kolo ${match.matchday}` : (match.stage ? match.stage.replace(/_/g, ' ') : "Šampionát");
 
             let golyDomaci = undefined; let golyHoste = undefined; let postupVal = "";
             const jeZapasAktivni = status === "FINISHED" || status === "IN_PLAY" || status === "PAUSED";
@@ -428,44 +435,51 @@ async function providniApiHeartbeat() {
                 dosloKStavoveZmene = true;
             }
 
-            const stary = RAM_CENTRAL_MATCHES[apiId];
-            if (!stary || stary.apiStatus !== status || stary.vysledek_domaci !== golyDomaci || stary.vysledek_hoste !== golyHoste || stary.postup !== postupVal) {
+            // 🛡️ STRATEGICKÁ INJEKTÁŽ LIVE DAT (Stop mizení zápasů a kol):
+            // Pokud už zápas v paměti RAM existuje (byl nasán na startu z tvé kolekce 'zapasy'),
+            // přepíšeme VÝHRADNÊ live parametry z trávníku. Tvoje struktura "Kolo 3" nebo "Play-off" je 100% v bezpečí.
+            if (RAM_CENTRAL_MATCHES[apiId]) {
+                const stary = RAM_CENTRAL_MATCHES[apiId];
+                if (stary.apiStatus !== status || stary.vysledek_domaci !== golyDomaci || stary.vysledek_hoste !== golyHoste || stary.postup !== postupVal) {
+                    dosloKStavoveZmene = true;
+                }
+                RAM_CENTRAL_MATCHES[apiId].vysledek_domaci = golyDomaci;
+                RAM_CENTRAL_MATCHES[apiId].vysledek_hoste = golyHoste;
+                RAM_CENTRAL_MATCHES[apiId].apiStatus = status;
+                RAM_CENTRAL_MATCHES[apiId].postup = postupVal;
+            } else {
                 dosloKStavoveZmene = true;
+                RAM_CENTRAL_MATCHES[apiId] = {
+                    domaci, hoste, datum: match.utcDate, isPlayoff,
+                    kolo: isPlayoff ? "Play-off" : "Šampionát",
+                    vysledek_domaci: golyDomaci, vysledek_hoste: golyHoste,
+                    apiStatus: status, postup: postupVal
+                };
             }
-
-            RAM_CENTRAL_MATCHES[apiId] = {
-                domaci, hoste, datum: match.utcDate, isPlayoff, kolo,
-                vysledek_domaci: golyDomaci, vysledek_hoste: golyHoste,
-                apiStatus: status, postup: postupVal
-            };
         }
 
         if (dosloKStavoveZmene || obsahujeAktivniZapas) {
-            console.log("⚡ Detekována herní aktivita nebo změna skóre. Přepočítávám RAM registry...");
+            console.log("⚡ Detekována změna skóre. Přepočítávám RAM registry...");
             await rekonstruujAgregaty(dosloKStavoveZmene);
         }
 
-        // ⏱️ INTELEKTUÁLNÍ MANAŽER ČASOVÁNÍ (Matematické provázání 6 -> 3 -> 0 -> Zámek)
-        const jeZapasV_OkneBojovehoRezimu = minRozdilDoZapasu <= 6; // Spínáme přesně 6 minut před zápasem
+        // ⏱️ CHIRURGICKÝ ČASOVÝ MANAŽER CYKLU (Synchronizace 6 -> 3 -> 0)
+        const jeZapasV_OkneBojovehoRezimu = minRozdilDoZapasu <= 6; // Spínáme bojový režim přesně 6 minut před zápasem
 
         if (obsahujeAktivniZapas || jeZapasV_OkneBojovehoRezimu) {
             console.log(`🚀 BATTLE MODE: Tikám na ostro každé ${RAM_BOT_CONFIG.liveInterval} minuty.`);
             setTimeout(providniApiHeartbeat, RAM_BOT_CONFIG.liveInterval * 60 * 1000);
         } else {
-            // Vyčkávací režim (Když je zápas ještě daleko)
             if (minRozdilDoZapasu <= 35) {
                 const casDoBojovehoRezimu = minRozdilDoZapasu - 6;
-                // MATEMATICKÝ ZÁCHYTNÝ JISTIČ: Pokud by standardní spánek přeletěl start T-6 minut,
-                // zkrátíme vteřinově spánek bota tak, aby trefil přesně značku 6 minut před výkopem!
                 const finalniSpanekMinut = (casDoBojovehoRezimu > 0 && casDoBojovehoRezimu < RAM_BOT_CONFIG.waitInterval) 
                     ? casDoBojovehoRezimu 
                     : RAM_BOT_CONFIG.waitInterval;
 
-                console.log(`⏳ ČEKÁNÍ: Zápas je blízko. Další kontrola situace přesně za ${Math.round(finalniSpanekMinut)} minut.`);
+                console.log(`⏳ ČEKÁNÍ: Další kontrola situace za ${Math.round(finalniSpanekMinut)} minut.`);
                 setTimeout(providniApiHeartbeat, finalniSpanekMinut * 60 * 1000);
             } else {
-                console.log("💤 KLID ZBRANÍ: Dnes už nic blízkého nezačíná. Vypínám smyčku, Chronos mě včas probudí.");
-                // Smyčka končí, Render bota uspí do hlubokého spánku
+                console.log("💤 KLID ZBRANÍ: Dnes už nic blízkého nezačíná. Vypínám smyčku, Chronos mě včas vzbudí.");
             }
         }
 
@@ -492,8 +506,8 @@ async function startEnterpriseApplication() {
     // 2. Připojíme dlouhoběžící vnitřní Firestore streamy
     inicializujLiveFirestoreStreams();
 
-    // 3. Spustíme API heartbeat radar po krátké úvodní pauze
-    setTimeout(providniApiHeartbeat, 4000);
+    // 3. Odpálíme nekonečnou kontrolní smyčku okamžitě (Závora v RAM si počká sama na dokončení sítě)
+    providniApiHeartbeat();
 }
 
 // Odpálení aplikace
