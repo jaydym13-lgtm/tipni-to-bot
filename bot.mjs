@@ -471,10 +471,7 @@ async function providniApiHeartbeat() {
                 apiStatus: status,
                 postup: postupVal || stary?.postup || ""
             };
-        }
-
         } else {
-                // 🆕 PRVOTNÍ INITIALIZACE: Pokud zápas v paměti RAM ještě vůbec neexistuje, bezpečně ho založíme
                 dosloKStavoveZmene = true;
                 RAM_CENTRAL_MATCHES[apiId] = {
                     domaci, hoste, datum: match.utcDate, isPlayoff,
@@ -483,7 +480,7 @@ async function providniApiHeartbeat() {
                     apiStatus: status, postup: postupVal
                 };
             }
-        } // 🌟 FIX: Tahle klíčová závorka ti v kódu chyběla! Uzavírá velký cyklus 'for (const match of matches)'
+        }
 
         if (dosloKStavoveZmene || obsahujeAktivniZapas) {
             console.log("⚡ Detekována změna skóre. Přepočítávám RAM registry...");
