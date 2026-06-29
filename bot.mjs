@@ -443,23 +443,38 @@ async function providniApiHeartbeat() {
                 dosloKStavoveZmene = true;
             }
 
-            // 🧠 ROZHODNUTÍ O SKUTEČNÝCH TÝMECH: Pokud je v DB text "Neznámý", ale API už zná reálné státy, 
-            // nekompromisně ho přepíšeme čerstvými daty z trávníku.
+            const stage = match.stage || "";
+            // 🧠 TVOJE PRAVIDLO PRO 4. KOLO: Pokud API nebo starý záznam hlásí LAST_32 nebo LAST_16,
+            // jedná se o tvůj balík 24 zápasů, kterým nekompromisně vnutíme název "4. kolo".
+            const jeToCtyrteKolo = stage === "LAST_32" || stage === "LAST_16" || stary?.kolo === "LAST_32" || stary?.kolo === "LAST_16" || stary?.kolo === "4. kolo";
+            
+            let spravneKoloTurnaje = "Šampionát";
+            if (jeToCtyrteKolo) {
+                spravneKoloTurnaje = "4. kolo";
+            } else if (isPlayoff) {
+                spravneKoloTurnaje = "Play-off"; // Od čtvrtfinále dál
+            } else if (match.matchday) {
+                spravneKoloTurnaje = `Kolo ${match.matchday}`;
+            }
+
+            // 🛡️ LIKVIDACE OTAZNÍKŮ: Pokud je v paměti nebo v DB "Neznámý", ale API už zná reálný tým, přepíšeme ho.
             const finalDomaci = (!stary || stary.domaci === "Neznámý") ? domaci : stary.domaci;
             const finalHoste = (!stary || stary.hoste === "Neznámý") ? hoste : stary.hoste;
 
-            // 💾 AUTOMATICKÝ ZPĚTNÝ MOST DO FIREBASE (Oživí Kolo 3 i celou sekci zápasů):
-            // Případ A: V DB visí text "Neznámý", ale API přineslo skutečné týmy pro osmifinále.
-            // Případ B: Live zápas skončil (FINISHED) a v databázi u něj stále svítí prázdné otazníky.
+            // 💾 AUTOMATICKÝ ZPĚTNÝ ZÁPIS: Jakmile zápas skončí, bot propíše skóre a správný název kola do tvého Firestore.
+            // Tím se ti Kolo 3 i 4. kolo začnou okamžitě samy vyhodnocovat přímo v databázi!
             const detekovanNovyRozlosovanyTym = stary && (stary.domaci === "Neznámý" && domaci !== "Neznámý");
             const jeUkoncenBezVysledkuVDB = status === "FINISHED" && golyDomaci !== undefined && golyHoste !== undefined && (!stary || stary.vysledek_domaci === undefined);
+            const potrebujeOpravitKoloVDB = stary && (stary.kolo === "LAST_32" || stary.kolo === "LAST_16" || (stary.kolo === "Play-off" && jeToCtyrteKolo));
 
-            if (detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB) {
-                console.log(`💾 SYNC FIRESTORE: Aktualizuji zápas ${finalDomaci} - ${finalHoste} v Firebase databázi.`);
+            if (detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB) {
+                console.log(`💾 AUTO-SYNC FIREBASE: Aktualizuji zápas ${finalDomaci} - ${finalHoste} na Kolo: ${spravneKoloTurnaje}`);
                 const syncPayload = {
                     domaci: finalDomaci,
                     hoste: finalHoste,
-                    apiStatus: status
+                    apiStatus: status,
+                    kolo: spravneKoloTurnaje,
+                    isPlayoff: isPlayoff
                 };
                 if (golyDomaci !== undefined) syncPayload.vysledek_domaci = golyDomaci;
                 if (golyHoste !== undefined) syncPayload.vysledek_hoste = golyHoste;
@@ -469,20 +484,19 @@ async function providniApiHeartbeat() {
                     .catch(e => console.error("❌ Chyba synchronizace do Firebase:", e));
             }
 
-            // 🛡️ OCHRANA STRUKTURY KOLA: Zápas uložíme do RAM. Pokud je to vyřazovák, natvrdo mu vnutíme 
-            // tvůj český frontendový štítek "Play-off", aby ti nezmizel pod anglickými názvy jako "LAST_32".
+            // Bezpečné uložení do vnitřní in-memory RAM paměti bota pro bleskový výpočet žebříčku
             RAM_CENTRAL_MATCHES[apiId] = {
                 domaci: finalDomaci,
                 hoste: finalHoste,
                 datum: match.utcDate,
                 isPlayoff: stary?.isPlayoff !== undefined ? stary.isPlayoff : isPlayoff,
-                kolo: stary?.kolo || (isPlayoff ? "Play-off" : kolo),
+                kolo: spravneKoloTurnaje,
                 vysledek_domaci: golyDomaci !== undefined ? golyDomaci : stary?.vysledek_domaci,
                 vysledek_hoste: golyHoste !== undefined ? golyHoste : stary?.vysledek_hoste,
                 apiStatus: status,
                 postup: postupVal || stary?.postup || ""
             };
-        } // 🌟 V pořádku uzavřený cyklus matches bez chybějících uvozovek a závorek
+        } // 🌟 V pořádku uzavřený velký cyklus matches 'for (const match of matches)' bez zbloudilých elementů!
 
         if (dosloKStavoveZmene || obsahujeAktivniZapas) {
             console.log("⚡ Detekována změna skóre. Přepočítávám RAM registry...");
