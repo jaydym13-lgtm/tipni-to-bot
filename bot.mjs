@@ -180,15 +180,17 @@ function inicializujLiveFirestoreStreams() {
                     isoDatum = typeof data.datum.toDate === 'function' ? data.datum.toDate().toISOString() : new Date(data.datum).toISOString();
                 }
 
+                // 🛡️ JISTIČ DAT: Firestore stream smí zapsat výsledek jen tehdy, pokud v DB reálně existuje.
+                // Pokud je v DB prázdno (undefined), zachováme hodnotu, kterou bot právě stáhl živě z API.
                 RAM_CENTRAL_MATCHES[matchId] = {
                     domaci: data.domaci || stary.domaci || "Neznámý",
                     hoste: data.hoste || stary.hoste || "Neznámý",
                     datum: isoDatum,
                     isPlayoff: data.isPlayoff !== undefined ? data.isPlayoff : (stary.isPlayoff || false),
                     kolo: data.kolo || stary.kolo || "Šampionát",
-                    vysledek_domaci: data.vysledek_domaci,
-                    vysledek_hoste: data.vysledek_hoste,
-                    apiStatus: data.apiStatus || stary.apiStatus || "FINISHED",
+                    vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : stary.vysledek_domaci,
+                    vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : stary.vysledek_hoste,
+                    apiStatus: data.apiStatus || stary.apiStatus || "SCHEDULED", // Změna z FINISHED na SCHEDULED!
                     postup: data.postup || stary.postup || ""
                 };
             }
@@ -440,23 +442,48 @@ async function providniApiHeartbeat() {
             // Přepisujeme výhradně live parametry z trávníku. Tvoje struktura "Kolo 3" nebo "Play-off" z Firestore je 100% v bezpečí.
             if (RAM_CENTRAL_MATCHES[apiId]) {
                 const stary = RAM_CENTRAL_MATCHES[apiId];
-                if (stary.apiStatus !== status || stary.vysledek_domaci !== golyDomaci || stary.vysledek_hoste !== golyHoste || stary.postup !== postupVal) {
-                    dosloKStavoveZmene = true;
-                }
-                RAM_CENTRAL_MATCHES[apiId].vysledek_domaci = golyDomaci;
-                RAM_CENTRAL_MATCHES[apiId].vysledek_hoste = golyHoste;
-                RAM_CENTRAL_MATCHES[apiId].apiStatus = status;
-                RAM_CENTRAL_MATCHES[apiId].postup = postupVal;
-            } else {
+            if (!stary || stary.apiStatus !== status || stary.vysledek_domaci !== golyDomaci || stary.vysledek_hoste !== golyHoste || stary.postup !== postupVal) {
+                dosloKStavoveZmene = true;
+            }
+
+            // 💾 AUTOMATICKÝ ZPĚTNÝ ZÁPIS DO FIREBASE: Jakmile reálný zápas skončí a ve Firestore chybí skóre,
+            // bot ho tam sám propíše. Tím okamžitě vyhodnotí Kolo 3 i play-off přímo v databázi a uzavře otazníky!
+            if (status === "FINISHED" && golyDomaci !== undefined && golyHoste !== undefined && (!stary || stary.vysledek_domaci === undefined)) {
+                console.log(`💾 SYNC BACK TO FIREBASE: Zápas ${domaci} - ${hoste} skončil (${golyDomaci}:${golyHoste}). Zapisuji výsledek.`);
+                db.collection("ligy").doc(LEAGUE_NAME).collection("zapasy").doc(apiId).set({
+                    vysledek_domaci: golyDomaci,
+                    vysledek_hoste: golyHoste,
+                    apiStatus: "FINISHED",
+                    postup: postupVal
+                }, { merge: true }).catch(e => console.error("❌ Chyba zpětného zápisu do Firebase:", e));
+            }
+
+            // 🛡️ OCHRANA STRUKTURY KOLA: Zachováme text "Kolo 3" nebo "Play-off" načtený z Firestore.
+            // API tam teď nebude moct natvrdo vnutit svůj surový anglický název (např. "ROUND OF 16").
+            RAM_CENTRAL_MATCHES[apiId] = {
+                domaci: stary?.domaci || domaci,
+                hoste: stary?.hoste || hoste,
+                datum: match.utcDate,
+                isPlayoff: stary?.isPlayoff !== undefined ? stary.isPlayoff : isPlayoff,
+                kolo: stary?.kolo || (isPlayoff ? "Play-off" : kolo),
+                vysledek_domaci: golyDomaci !== undefined ? golyDomaci : stary?.vysledek_domaci,
+                vysledek_hoste: golyHoste !== undefined ? golyHoste : stary?.vysledek_hoste,
+                apiStatus: status,
+                postup: postupVal || stary?.postup || ""
+            };
+        }
+
+        } else {
+                // 🆕 PRVOTNÍ INITIALIZACE: Pokud zápas v paměti RAM ještě vůbec neexistuje, bezpečně ho založíme
                 dosloKStavoveZmene = true;
                 RAM_CENTRAL_MATCHES[apiId] = {
                     domaci, hoste, datum: match.utcDate, isPlayoff,
-                    kolo: isPlayoff ? "Play-off" : "Šampionát",
+                    kolo: isPlayoff ? "Play-off" : kolo,
                     vysledek_domaci: golyDomaci, vysledek_hoste: golyHoste,
                     apiStatus: status, postup: postupVal
                 };
             }
-        }
+        } // 🌟 FIX: Tahle klíčová závorka ti v kódu chyběla! Uzavírá velký cyklus 'for (const match of matches)'
 
         if (dosloKStavoveZmene || obsahujeAktivniZapas) {
             console.log("⚡ Detekována změna skóre. Přepočítávám RAM registry...");
