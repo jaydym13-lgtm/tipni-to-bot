@@ -379,8 +379,14 @@ async function providniApiHeartbeat() {
         for (const match of matches) {
             const apiId = String(match.id);
             const status = match.status;
-            const matchStarted = new Date(match.utcDate) <= nyni;
-            const rozdilMinut = (new Date(match.utcDate) - nyni) / (1000 * 60);
+            // 🧠 NEPRŮSTŘELNÝ MILISEKUNDOVÝ JISTIČ + API TRUMP
+            const nyniMilisekundy = Date.now();
+            const startZapasuMilisekundy = Date.parse(match.utcDate);
+            const rozdilMinut = (startZapasuMilisekundy - nyniMilisekundy) / (1000 * 60);
+
+            // Pokud API hlásí live zápas, ignorujeme hodiny a okamžitě zamykáme
+            const uzSeHrajePodleAPI = status === "IN_PLAY" || status === "PAUSED" || status === "LIVE";
+            const matchStarted = uzSeHrajePodleAPI || (nyniMilisekundy >= startZapasuMilisekundy);
 
             // 🚨 AUTOMATICKÝ JISTIČ PROTI ZPOŽDĚNÍ API:
             // Pokud zápas podle času už odstartoval (rozdilMinut <= 0), ale API ho ještě 
