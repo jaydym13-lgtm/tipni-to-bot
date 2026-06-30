@@ -382,6 +382,13 @@ async function providniApiHeartbeat() {
             const matchStarted = new Date(match.utcDate) <= nyni;
             const rozdilMinut = (new Date(match.utcDate) - nyni) / (1000 * 60);
 
+            // 🚨 AUTOMATICKÝ JISTIČ PROTI ZPOŽDĚNÍ API:
+            // Pokud zápas podle času už odstartoval (rozdilMinut <= 0), ale API ho ještě 
+            // neuzavřelo (status !== "FINISHED"), natvrdo držíme bojový režim bota!
+            if (status !== "FINISHED" && rozdilMinut <= 0) {
+                obsahujeAktivniZapas = true;
+            }
+
             if (rozdilMinut > 0 && rozdilMinut < minRozdilDoZapasu) {
                 minRozdilDoZapasu = rozdilMinut;
             }
