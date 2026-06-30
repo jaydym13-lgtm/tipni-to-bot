@@ -108,10 +108,27 @@ async function uploadToR2(filename, jsonData) {
 }
 
 // --- 📡 DATA PIPELINES (Firestore Real-time Sync) ---
+let apiHeartbeatStartedGlobal = false;
+const readySignalsGlobal = { users: false, tips: false, matches: false };
+
+// 🪐 EVENT-DRIVEN POŠŤÁK: Hlídá synchronní připravenost RAM paměti bez hnusných timeoutů!
+function emitReadySignalGlobal(streamName) {
+    if (!readySignalsGlobal[streamName]) {
+        readySignalsGlobal[streamName] = true;
+        console.log(`📡 SIGNÁL POŠŤÁKA: Stream [${streamName}] kompletně natekl ze sítě do RAM paměti.`);
+        
+        // V momentě, kdy jsou všechny 3 hlavní streamy v pořádku stažené, bezpečně odpalujeme heartbeat loop
+        if (readySignalsGlobal.users && readySignalsGlobal.tips && readySignalsGlobal.matches && !apiHeartbeatStartedGlobal) {
+            apiHeartbeatStartedGlobal = true;
+            console.log("🚀 POŠŤÁK ODPALUJE HLAVNÍ LOOP: Všechna data jsou bezpečně v RAM. Spouštím neprůstřelný sportovní Heartbeat!");
+            providniApiHeartbeat();
+        }
+    }
+}
+
 function inicializujLiveFirestoreStreams() {
     console.log("👥 Spouštím permanentní RAM synchronizaci uživatelských účtů...");
 
-    // 🎛️ ŽIVÝ RADAR PRO OVLÁDÁNÍ BOTA (Bleskově naslouchá tvému Super Admin panelu bez restartů)
     db.collection("system").doc("bot_config").onSnapshot(doc => {
         if (doc.exists) {
             const data = doc.data();
@@ -139,7 +156,8 @@ function inicializujLiveFirestoreStreams() {
                 }
             }
         });
-    });
+        emitReadySignalGlobal("users");
+    }, err => console.error("❌ Chyba streamu uživatelů:", err));
 
     console.log(`🪐 Ladím rádiový in-memory stream pro všechny sezónní monolity...`);
     db.collectionGroup("sezony").onSnapshot(snapshot => {
@@ -162,6 +180,7 @@ function inicializujLiveFirestoreStreams() {
               }
           });
           rekonstruujAgregaty();
+          emitReadySignalGlobal("tips");
       }, (err) => console.error("❌ Kritický výpadek databázového streamu sezón:", err));
 
     console.log(`📡 Spouštím permanentní synchronizaci zápasů z Firestore pro Admin Panel...`);
@@ -180,8 +199,6 @@ function inicializujLiveFirestoreStreams() {
                     isoDatum = typeof data.datum.toDate === 'function' ? data.datum.toDate().toISOString() : new Date(data.datum).toISOString();
                 }
 
-                // 🛡️ JISTIČ DAT: Firestore stream smí zapsat výsledek jen tehdy, pokud v DB reálně existuje.
-                // Pokud je v DB prázdno (undefined), zachováme hodnotu, kterou bot právě stáhl živě z API.
                 RAM_CENTRAL_MATCHES[matchId] = {
                     domaci: data.domaci || stary.domaci || "Neznámý",
                     hoste: data.hoste || stary.hoste || "Neznámý",
@@ -190,12 +207,13 @@ function inicializujLiveFirestoreStreams() {
                     kolo: data.kolo || stary.kolo || "Šampionát",
                     vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : stary.vysledek_domaci,
                     vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : stary.vysledek_hoste,
-                    apiStatus: data.apiStatus || stary.apiStatus || "SCHEDULED", // Změna z FINISHED na SCHEDULED!
+                    apiStatus: data.apiStatus || stary.apiStatus || "SCHEDULED",
                     postup: data.postup || stary.postup || ""
                 };
             }
         });
         rekonstruujAgregaty();
+        emitReadySignalGlobal("matches");
     }, (err) => console.error("❌ Chyba streamu zápasů z Firestore:", err));
 }
 
@@ -561,8 +579,7 @@ async function startEnterpriseApplication() {
     // 2. Připojíme dlouhoběžící vnitřní Firestore streamy
     inicializujLiveFirestoreStreams();
 
-    // 3. Odpálíme nekonečnou kontrolní smyčku okamžitě (Závora v RAM si počká sama na dokončení sítě)
-    providniApiHeartbeat();
+    console.log("🛰️ BOOT STRAP: Rádiové streamy nahozeny. Čekám na kompletní doručení signálů od pošťáka...");
 }
 
 // Odpálení aplikace
