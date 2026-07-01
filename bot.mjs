@@ -578,8 +578,10 @@ async function providniApiHeartbeat() {
                 obsahujeAktivniZapas = true;
             }
 
+            let pristiZapasIso = null; // Globální záchytná kotva nad cyklem matches
             if (rozdilMinut > 0 && rozdilMinut < minRozdilDoZapasu) {
                 minRozdilDoZapasu = rozdilMinut;
+                pristiZapasIso = match.utcDate;
             }
 
             const rawDomaci = match.homeTeam?.name || "Neznámý";
@@ -700,6 +702,18 @@ async function providniApiHeartbeat() {
         if (dosloKStavoveZmene || obsahujeAktivniZapas) {
             console.log("⚡ Detekována změna skóre. Přepočítávám RAM registry...");
             await rekonstruujAgregaty(dosloKStavoveZmene);
+        }
+
+        // 📡 RADAR SYNC: Zápis jednoho koordinačního dokumentu pro ultra-levný provoz Cloud Functions
+        try {
+            await db.collection("ligy").doc(LEAGUE_NAME).collection("stav").doc("radar").set({
+                beziLive: obsahujeAktivniZapas,
+                pristiZapasUtc: pristiZapasIso || null,
+                aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log("📡 RADAR SYNC: Řídicí maják pro Cloud Function úspěšně zaktualizován v DB.");
+        } catch (radarErr) {
+            console.error("❌ Selhal zápis radarových dat do Firestore:", radarErr);
         }
 
         // ⏱️ CHIRURGICKÝ ČASOVÝ MANAŽER CYKLU (Synchronizace 6 -> 3 -> 0)
