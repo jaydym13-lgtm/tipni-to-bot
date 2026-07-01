@@ -467,6 +467,12 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         }
     });
 
+    // 🧠 VÝPOČET VIRTUÁLNÍHO POSUNU (DELTA): Porovnáme indexy mezi stabilní a live tabulkou
+    zebricekLivePole.forEach((pLive, idxLive) => {
+        const idxOfficial = zebricekPole.findIndex(pOff => pOff.uid === pLive.uid);
+        pLive.poziceDelta = idxOfficial !== -1 ? (idxOfficial - idxLive) : 0;
+    });
+
     const liveMatchIds = Object.keys(RAM_CENTRAL_MATCHES).filter(id => {
         const z = RAM_CENTRAL_MATCHES[id];
         return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED";
