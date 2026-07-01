@@ -352,9 +352,18 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         });
     });
 
+    // 🧠 SENIORNÍ DETEKCE MAXIMA: Najdeme nejvyšší bodový zisk a k němu přibalíme i název kola
     Object.keys(zebricekMapa).forEach(em => {
-        const kolaBodove = Object.values(zebricekMapa[em].bodyPoKolech);
-        zebricekMapa[em].nejviceBoduVKole = kolaBodove.length > 0 ? Math.max(...kolaBodove) : 0;
+        let maxPts = 0;
+        let maxKolo = '–';
+        Object.entries(zebricekMapa[em].bodyPoKolech).forEach(([klicKola, pts]) => {
+            if (pts > maxPts) {
+                maxPts = pts;
+                maxKolo = klicKola;
+            }
+        });
+        zebricekMapa[em].nejviceBoduVKole = maxPts;
+        zebricekMapa[em].nejviceBoduVKoleNazev = maxKolo;
     });
 
     // 🏆 GENERÁTOR STATICKÝCH REKORDŮ (Základní odehrané zápasy)
@@ -429,7 +438,8 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         uid: zebricekMapa[em].uid, email: em, nickname: zebricekMapa[em].nickname,
         celkemBodu: zebricekMapa[em].celkemBodu, natipovaneVyhodnocene: zebricekMapa[em].natipovaneVyhodnocene,
         nenatipovaneVyhodnocene: zebricekMapa[em].nenatipovaneVyhodnocene, presneVysledkyCount: zebricekMapa[em].presneVysledkyCount,
-        nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
+        nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[em].nejviceBoduVKoleNazev || '–',
+        vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
         bodyKoloAktualni: zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0,
         efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[em].bodyZapasuCelkem / maxMoznychBoduZapasu) * 100 : 0
     })).sort((a, b) => {
@@ -441,7 +451,8 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         uid: zebricekMapa[em].uid, email: em, nickname: zebricekMapa[em].nickname,
         celkemBodu: zebricekMapa[em].celkemBoduLive, natipovaneVyhodnocene: zebricekMapa[em].natipovaneVyhodnoceneLive,
         nenatipovaneVyhodnocene: zebricekMapa[em].nenatipovaneVyhodnoceneLive, presneVysledkyCount: zebricekMapa[em].presneVysledkyCountLive,
-        nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
+        nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[em].nejviceBoduVKoleNazev || '–',
+        vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
         bodyKoloAktualni: zebricekMapa[em].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[em].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0),
         efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[em].bodyZapasuCelkemLive / maxMoznychBoduZapasu) * 100 : 0
     })).sort((a, b) => {
