@@ -357,7 +357,7 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         zebricekMapa[em].nejviceBoduVKole = kolaBodove.length > 0 ? Math.max(...kolaBodove) : 0;
     });
 
-    // 🏆 GENERATOR STRUKTUROVANÝCH TOP 3 REKORDŮ PRO TURNAJ (ZRCADLO CLOUDU)
+    // 🏆 GENERÁTOR STATICKÝCH REKORDŮ (Základní odehrané zápasy)
     const vsechnyPresne = Object.keys(zebricekMapa).map(email => ({
         nickname: zebricekMapa[email].nickname,
         count: zebricekMapa[email].presneVysledkyCount
@@ -381,6 +381,34 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
     const unikatniKolaZisky = [...new Set(vsechnyKolaZisky.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
     const top3Kola = unikatniKolaZisky.map(points => {
         const entries = vsechnyKolaZisky.filter(p => p.points === points);
+        const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
+        return { points, text: formattedArr.join(', ') };
+    });
+
+    // 🔥 🏆 GENERÁTOR REÁLNÝCH LIVE REKORDŮ (Počítá průběžné stavy během zápasů)
+    const vsechnyPresneLive = Object.keys(zebricekMapa).map(email => ({
+        nickname: zebricekMapa[email].nickname,
+        count: zebricekMapa[email].presneVysledkyCountLive
+    })).filter(p => p.count > 0);
+    const unikatniPresneBadgesLive = [...new Set(vsechnyPresneLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3PresneLive = unikatniPresneBadgesLive.map(count => {
+        const nicks = vsechnyPresneLive.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
+
+    const vsechnyKolaZiskyLive = [];
+    Object.keys(zebricekMapa).forEach(em => {
+        const nickname = zebricekMapa[em].nickname;
+        Object.keys(zebricekMapa[em].bodyPoKolechLive).forEach(klicKola => {
+            const pts = zebricekMapa[em].bodyPoKolechLive[klicKola];
+            if (pts > 0) {
+                vsechnyKolaZiskyLive.push({ nickname, points: pts, round: klicKola });
+            }
+        });
+    });
+    const unikatniKolaZiskyLive = [...new Set(vsechnyKolaZiskyLive.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+    const top3KolaLive = unikatniKolaZiskyLive.map(points => {
+        const entries = vsechnyKolaZiskyLive.filter(p => p.points === points);
         const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
         return { points, text: formattedArr.join(', ') };
     });
@@ -433,6 +461,7 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED";
     });
 
+    // 📊 SESTAVENÍ FINÁLNÍHO NEPRŮSTŘELNÉHO DATA-BALÍČKU PRO FRONTEND
     const leaderboardJson = {
         zebricek: zebricekPole, 
         zebricekLive: zebricekLivePole, 
@@ -440,11 +469,14 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         mapaPrezdivek: mapaPrezdivek,
         top3Presne: top3Presne,
         top3Kola: top3Kola,
+        top3PresneLive: top3PresneLive, // 🔥 Posíláme reálné LIVE trofeje přesnosti
+        top3KolaLive: top3KolaLive,     // 🔥 Posíláme reálné LIVE trofeje kol
         top3AktualniKolo: top3AktualniKolo,
         aktivniKoloText: aktivniKolo,
         aktualizovano: timestampNow
     };
 
+    // 🚀 Odesíláme bleskově na Cloudflare R2
     await uploadToR2("leaderboard.json", leaderboardJson);
 
     const rozpisJson = { zapasyMapa: RAM_CENTRAL_MATCHES, aktualizovano: timestampNow };
@@ -467,7 +499,7 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         }
     }
 
-    // 🔥 DYNAMICKÝ LIVE MOST: Bot nakopne puls ve Firestore a frontend okamžitě stáhne live data z R2!
+    // 📡 LIVE PULS SYNC: Bot jemně drcne do Firestore a všem lidem na webu okamžitě naskočí změny!
     try {
         const pulsRef = db.collection('ligy').doc(LEAGUE_NAME).collection('stav').doc('puls');
         await pulsRef.set({
