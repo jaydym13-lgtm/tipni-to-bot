@@ -261,10 +261,51 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         });
     }
 
+    // 🧠 DETEKCE AKTUÁLNÍHO PROBÍHAJÍCÍHO KOLA V RAM
+    let aktivniKolo = "1";
+    const zapasySerazene = Object.values(RAM_CENTRAL_MATCHES).sort((a, b) => {
+        const dA = new Date(a.datum);
+        const dB = new Date(b.datum);
+        return dA - dB;
+    });
+    const liveNeboBudouci = zapasySerazene.find(z => z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || new Date(z.datum) > new Date());
+    if (liveNeboBudouci && liveNeboBudouci.kolo) {
+        aktivniKolo = String(liveNeboBudouci.kolo).trim();
+    } else if (zapasySerazene.length > 0) {
+        aktivniKolo = String(zapasySerazene[zapasySerazene.length - 1].kolo || "1").trim();
+    }
+
+    // 🧮 VÝPOČET MAXIMÁLNÍCH MOŽNÝCH BODŮ PRO AKTIVNÍ/UKONČENÉ UTKÁNÍ
+    let maxMoznychBoduZapasu = 0;
+    Object.values(RAM_CENTRAL_MATCHES).forEach(zapas => {
+        const jeVyhodnoceny = (zapas.vysledek_domaci !== undefined && zapas.apiStatus !== "IN_PLAY" && zapas.apiStatus !== "PAUSED");
+        const jeBežícíLive = (zapas.apiStatus === "IN_PLAY" || zapas.apiStatus === "PAUSED");
+        if (jeVyhodnoceny || jeBežícíLive) {
+            if (LEAGUE_NAME === "MS ve fotbale") {
+                maxMoznychBoduZapasu += (zapas.isPlayoff && zapas.vysledek_domaci === zapas.vysledek_hoste) ? 7 : 6;
+            } else {
+                maxMoznychBoduZapasu += 3;
+            }
+        }
+    });
+
+    const jeFotbaloveMS = (LEAGUE_NAME === "MS ve fotbale");
+
+    // Reinicializace a pojištění polí v RAM pro stoprocentní zrcadlení cloudu
+    Object.keys(zebricekMapa).forEach(email => {
+        zebricekMapa[email].bodyPoKolechLive = {};
+        zebricekMapa[email].bodyZapasuCelkem = 0;
+        zebricekMapa[email].bodyZapasuCelkemLive = 0;
+    });
+
     Object.keys(RAM_CENTRAL_MATCHES).forEach(matchId => {
         const zapas = RAM_CENTRAL_MATCHES[matchId];
         const jeVyhodnoceny = (zapas.vysledek_domaci !== undefined && zapas.apiStatus !== "IN_PLAY" && zapas.apiStatus !== "PAUSED");
-        const jeLiveNeboVyhodnoceny = (zapas.vysledek_domaci !== undefined);
+        const jeBežícíLive = (zapas.apiStatus === "IN_PLAY" || zapas.apiStatus === "PAUSED");
+        const jeLiveNeboVyhodnoceny = (zapas.vysledek_domaci !== undefined) || jeBežícíLive;
+
+        const vDomaci = zapas.vysledek_domaci !== undefined && zapas.vysledek_domaci !== null ? zapas.vysledek_domaci : 0;
+        const vHoste = zapas.vysledek_hoste !== undefined && zapas.vysledek_hoste !== null ? zapas.vysledek_hoste : 0;
 
         Object.keys(RAM_USERS_PROFILES).forEach(uid => {
             const em = RAM_USERS_PROFILES[uid].email;
@@ -274,28 +315,38 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
             const uTip = uTips[matchId];
 
             if (jeVyhodnoceny) {
-                let body = 0;
+                let bodyZapasu = 0;
                 if (uTip) {
-                    body = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zapas.vysledek_domaci, zapas.vysledek_hoste, uTip.postup, zapas.postup, zapas.isPlayoff);
-                    zebricekMapa[em].celkemBodu += body; zebricekMapa[em].natipovaneVyhodnocene++;
-                    if (parseInt(uTip.tip_domaci) === zapas.vysledek_domaci && parseInt(uTip.tip_hoste) === zapas.vysledek_hoste) zebricekMapa[em].presneVysledkyCount++;
+                    bodyZapasu = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zapas.vysledek_domaci, zapas.vysledek_hoste, uTip.postup, zapas.postup, zapas.isPlayoff);
+                    zebricekMapa[em].celkemBodu += bodyZapasu; zebricekMapa[em].natipovaneVyhodnocene++;
+                    if (parseInt(uTip.tip_domaci) === parseInt(zapas.vysledek_domaci) && parseInt(uTip.tip_hoste) === parseInt(zapas.vysledek_hoste)) zebricekMapa[em].presneVysledkyCount++;
                 } else {
-                    if (LEAGUE_NAME === "MS ve fotbale") { body = -1; zebricekMapa[em].celkemBodu += body; }
+                    if (jeFotbaloveMS) { bodyZapasu = -1; zebricekMapa[em].celkemBodu += bodyZapasu; }
                     zebricekMapa[em].nenatipovaneVyhodnocene++;
                 }
+                zebricekMapa[em].bodyZapasuCelkem += bodyZapasu;
                 if (zapas.kolo) {
-                    const klic = String(zapas.kolo).trim();
-                    zebricekMapa[em].bodyPoKolech[klic] = (zebricekMapa[em].bodyPoKolech[klic] || 0) + body;
+                    const klicKola = String(zapas.kolo).trim();
+                    if (zebricekMapa[em].bodyPoKolech[klicKola] === undefined) zebricekMapa[em].bodyPoKolech[klicKola] = 0;
+                    zebricekMapa[em].bodyPoKolech[klicKola] += bodyZapasu;
                 }
             }
 
             if (jeLiveNeboVyhodnoceny) {
+                let bodyZapasuLive = 0;
                 if (uTip) {
-                    const bodyL = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zapas.vysledek_domaci || 0, zapas.vysledek_hoste || 0, uTip.postup, zapas.postup, zapas.isPlayoff);
-                    zebricekMapa[em].celkemBoduLive += bodyL; zebricekMapa[em].natipovaneVyhodnoceneLive++;
+                    bodyZapasuLive = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, vDomaci, vHoste, uTip.postup, zapas.postup, zapas.isPlayoff);
+                    zebricekMapa[em].celkemBoduLive += bodyZapasuLive; zebricekMapa[em].natipovaneVyhodnoceneLive++;
+                    if (parseInt(uTip.tip_domaci) === parseInt(vDomaci) && parseInt(uTip.tip_hoste) === parseInt(vHoste)) zebricekMapa[em].presneVysledkyCountLive++;
                 } else {
-                    if (LEAGUE_NAME === "MS ve fotbale") zebricekMapa[em].celkemBoduLive += -1;
+                    if (jeFotbaloveMS) { bodyZapasuLive = -1; zebricekMapa[em].celkemBoduLive += bodyZapasuLive; }
                     zebricekMapa[em].nenatipovaneVyhodnoceneLive++;
+                }
+                zebricekMapa[em].bodyZapasuCelkemLive += bodyZapasuLive;
+                if (zapas.kolo) {
+                    const klicKola = String(zapas.kolo).trim();
+                    if (zebricekMapa[em].bodyPoKolechLive[klicKola] === undefined) zebricekMapa[em].bodyPoKolechLive[klicKola] = 0;
+                    zebricekMapa[em].bodyPoKolechLive[klicKola] += bodyZapasuLive;
                 }
             }
         });
@@ -306,30 +357,76 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
         zebricekMapa[em].nejviceBoduVKole = kolaBodove.length > 0 ? Math.max(...kolaBodove) : 0;
     });
 
-    let maxPresnychGlobal = 0; let maxBoduKoloGlobal = 0;
-    Object.keys(zebricekMapa).forEach(em => {
-        if (zebricekMapa[em].presneVysledkyCount > maxPresnychGlobal) maxPresnychGlobal = zebricekMapa[em].presneVysledkyCount;
-        if (zebricekMapa[em].nejviceBoduVKole > maxBoduKoloGlobal) maxBoduKoloGlobal = zebricekMapa[em].nejviceBoduVKole;
-    });
-    let kraliPresnosti = []; let rekordmaniKola = [];
-    Object.keys(zebricekMapa).forEach(em => {
-        if (zebricekMapa[em].presneVysledkyCount === maxPresnychGlobal && maxPresnychGlobal > 0) kraliPresnosti.push(zebricekMapa[em].nickname);
-        if (zebricekMapa[em].nejviceBoduVKole === maxBoduKoloGlobal && maxBoduKoloGlobal > 0) rekordmaniKola.push(zebricekMapa[em].nickname);
+    // 🏆 GENERATOR STRUKTUROVANÝCH TOP 3 REKORDŮ PRO TURNAJ (ZRCADLO CLOUDU)
+    const vsechnyPresne = Object.keys(zebricekMapa).map(email => ({
+        nickname: zebricekMapa[email].nickname,
+        count: zebricekMapa[email].presneVysledkyCount
+    })).filter(p => p.count > 0);
+    const unikatniPresneBadges = [...new Set(vsechnyPresne.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3Presne = unikatniPresneBadges.map(count => {
+        const nicks = vsechnyPresne.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
     });
 
-    const zebricekPole = Object.values(zebricekMapa).map(h => ({
-        uid: h.uid, email: h.email, nickname: h.nickname, celkemBodu: h.celkemBodu,
-        natipovaneVyhodnocene: h.natipovaneVyhodnocene, nenatipovaneVyhodnocene: h.nenatipovaneVyhodnocene,
-        presneVysledkyCount: h.presneVysledkyCount, nejviceBoduVKole: h.nejviceBoduVKole,
-        vitezMs: h.vitezMs, nejStrelec: h.nejStrelec
-    })).sort((a, b) => b.celkemBodu - a.celkemBodu);
+    const vsechnyKolaZisky = [];
+    Object.keys(zebricekMapa).forEach(em => {
+        const nickname = zebricekMapa[em].nickname;
+        Object.keys(zebricekMapa[em].bodyPoKolech).forEach(klicKola => {
+            const pts = zebricekMapa[em].bodyPoKolech[klicKola];
+            if (pts > 0) {
+                vsechnyKolaZisky.push({ nickname, points: pts, round: klicKola });
+            }
+        });
+    });
+    const unikatniKolaZisky = [...new Set(vsechnyKolaZisky.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+    const top3Kola = unikatniKolaZisky.map(points => {
+        const entries = vsechnyKolaZisky.filter(p => p.points === points);
+        const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
+        return { points, text: formattedArr.join(', ') };
+    });
 
-    const zebricekLivePole = Object.values(zebricekMapa).map(h => ({
-        uid: h.uid, email: h.email, nickname: h.nickname, celkemBodu: h.celkemBoduLive,
-        natipovaneVyhodnocene: h.natipovaneVyhodnoceneLive, nenatipovaneVyhodnocene: h.nenatipovaneVyhodnoceneLive,
-        presneVysledkyCount: h.presneVysledkyCountLive, nejviceBoduVKole: h.nejviceBoduVKole,
-        vitezMs: h.vitezMs, nejStrelec: h.nejStrelec
-    })).sort((a, b) => b.celkemBodu - a.celkemBodu);
+    const vsechnyAktualniKolo = Object.keys(zebricekMapa).map(em => {
+        const stats = zebricekMapa[em];
+        const pts = stats.bodyPoKolechLive?.[aktivniKolo] !== undefined ? stats.bodyPoKolechLive[aktivniKolo] : (stats.bodyPoKolech[aktivniKolo] || 0);
+        return { nickname: stats.nickname, points: pts };
+    }).filter(p => p.points > 0);
+    const unikatniAktualniZisky = [...new Set(vsechnyAktualniKolo.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+    const top3AktualniKolo = unikatniAktualniZisky.map(points => {
+        const nicks = vsechnyAktualniKolo.filter(p => p.points === points).map(p => p.nickname);
+        return { points, names: nicks.join(', ') };
+    });
+
+    // 🧮 MAPOVÁNÍ FINÁLNÍCH POLÍ S EFEKTIVITOU, AKTUÁLNÍM KOLEM A SPRAVEDLIVÝM TIE-BREAKEREM
+    const zebricekPole = Object.keys(zebricekMapa).map(em => ({
+        uid: zebricekMapa[em].uid, email: em, nickname: zebricekMapa[em].nickname,
+        celkemBodu: zebricekMapa[em].celkemBodu, natipovaneVyhodnocene: zebricekMapa[em].natipovaneVyhodnocene,
+        nenatipovaneVyhodnocene: zebricekMapa[em].nenatipovaneVyhodnocene, presneVysledkyCount: zebricekMapa[em].presneVysledkyCount,
+        nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
+        bodyKoloAktualni: zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0,
+        efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[em].bodyZapasuCelkem / maxMoznychBoduZapasu) * 100 : 0
+    })).sort((a, b) => {
+        if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
+        return b.presneVysledkyCount - a.presneVysledkyCount;
+    });
+
+    const zebricekLivePole = Object.keys(zebricekMapa).map(em => ({
+        uid: zebricekMapa[em].uid, email: em, nickname: zebricekMapa[em].nickname,
+        celkemBodu: zebricekMapa[em].celkemBoduLive, natipovaneVyhodnocene: zebricekMapa[em].natipovaneVyhodnoceneLive,
+        nenatipovaneVyhodnocene: zebricekMapa[em].nenatipovaneVyhodnoceneLive, presneVysledkyCount: zebricekMapa[em].presneVysledkyCountLive,
+        nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
+        bodyKoloAktualni: zebricekMapa[em].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[em].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0),
+        efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[em].bodyZapasuCelkemLive / maxMoznychBoduZapasu) * 100 : 0
+    })).sort((a, b) => {
+        if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
+        return b.presneVysledkyCount - a.presneVysledkyCount;
+    });
+
+    zebricekLivePole.forEach(p => {
+        const em = p.email;
+        if (zebricekMapa[em] && zebricekMapa[em].bodyPoKolechLive) {
+            p.bodyKoloAktualni = zebricekMapa[em].bodyPoKolechLive[aktivniKolo] !== undefined ? zebricekMapa[em].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0);
+        }
+    });
 
     const liveMatchIds = Object.keys(RAM_CENTRAL_MATCHES).filter(id => {
         const z = RAM_CENTRAL_MATCHES[id];
@@ -337,11 +434,17 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
     });
 
     const leaderboardJson = {
-        zebricek: zebricekPole, zebricekLive: zebricekLivePole, isLive: liveMatchIds.length > 0, mapaPrezdivek: mapaPrezdivek,
-        textKraliPresnosti: kraliPresnosti.length > 0 ? `${kraliPresnosti.join(', ')} (${maxPresnychGlobal}x)` : '–',
-        textRekordmaniKola: rekordmaniKola.length > 0 ? `${rekordmaniKola.join(', ')} (${maxBoduKoloGlobal} b.)` : '–',
+        zebricek: zebricekPole, 
+        zebricekLive: zebricekLivePole, 
+        isLive: liveMatchIds.length > 0, 
+        mapaPrezdivek: mapaPrezdivek,
+        top3Presne: top3Presne,
+        top3Kola: top3Kola,
+        top3AktualniKolo: top3AktualniKolo,
+        aktivniKoloText: aktivniKolo,
         aktualizovano: timestampNow
     };
+
     await uploadToR2("leaderboard.json", leaderboardJson);
 
     const rozpisJson = { zapasyMapa: RAM_CENTRAL_MATCHES, aktualizovano: timestampNow };
@@ -552,7 +655,7 @@ async function providniApiHeartbeat() {
                 console.log(`⏳ ČEKÁNÍ: Zápas je blízko. Další kontrola situace za ${Math.round(finalniSpanekMinut)} minut.`);
                 setTimeout(providniApiHeartbeat, finalniSpanekMinut * 60 * 1000);
             } else {
-                console.log("💤 KLID ZBRANÍ: Dnes už nic blízkého nezačíná. Vypínám smyčku, Chronos mě včas vzbudí.");
+                console.log(`💤 KLID ZBRANÍ: V dohledných 35 minutách nic nezačíná. Nejbližší zápas je za ${Math.round(minRozdilDoZapasu)} min. Vypínám vnitřní smyčku, Chronos mě vzbudí.`);
             }
         }
 
