@@ -550,7 +550,8 @@ async function providniApiHeartbeat() {
             }
 
             // --- 🔒 JISTIČ TIPOVACÍ BOUŘE: Výkop zápasu (T-0 minut chirurgicky přesně) ---
-            if (matchStarted && !PROCESSED_FREEZE_MATCHES.has(apiId)) {
+            // Zamykáme pouze zápasy, které nejsou kompletně hotové (FINISHED) – konec R2 spamu po restartu!
+            if (status !== "FINISHED" && matchStarted && !PROCESSED_FREEZE_MATCHES.has(apiId)) {
                 console.log(`🔒 LOCK T-0: Právě nastal čas výkopu zápasu ${domaci} – ${hoste}. Zmrazuji tipy!`);
                 
                 const tipyProZapasPole = [];
