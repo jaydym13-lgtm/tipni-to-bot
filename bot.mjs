@@ -466,6 +466,19 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
             await uploadToR2(`historie_hrace_${uid}.json`, historieJson);
         }
     }
+
+    // 🔥 DYNAMICKÝ LIVE MOST: Bot nakopne puls ve Firestore a frontend okamžitě stáhne live data z R2!
+    try {
+        const pulsRef = db.collection('ligy').doc(LEAGUE_NAME).collection('stav').doc('puls');
+        await pulsRef.set({
+            verzeRozpisu: admin.firestore.FieldValue.increment(1),
+            verzeZebricku: admin.firestore.FieldValue.increment(1),
+            aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        console.log("📡 PULS SYNC: Firestore puls úspěšně aktualizován. Frontend dostal signál k reloadu.");
+    } catch (pulsErr) {
+        console.error("❌ Selhal zápis pulsu do Firestore:", pulsErr);
+    }
 }
 
 async function providniApiHeartbeat() {
