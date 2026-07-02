@@ -572,6 +572,13 @@ async function providniApiHeartbeat() {
             const uzSeHrajePodleAPI = status === "IN_PLAY" || status === "PAUSED" || status === "LIVE";
             const matchStarted = uzSeHrajePodleAPI || (nyniMilisekundy >= startZapasuMilisekundy);
 
+            // ⏳ DIETA BUDOUCNOSTI (FÁZE 1): Budoucí zápasy propouštíme do systému maximálně na 4 týdny (28 dní) dopředu.
+            // Odehrané (FINISHED) a běžící (LIVE) zápasy pochopitelně prochází dál bez omezení.
+            const limitBudoucnostiMili = 28 * 24 * 60 * 60 * 1000;
+            if (status === "SCHEDULED" && (startZapasuMilisekundy - nyniMilisekundy) > limitBudoucnostiMili) {
+                continue; // Zápas je příliš daleko v budoucnosti, přeskočíme ho, ať nezatěžuje RAM ani R2!
+            }
+
             // 🚨 AUTOMATICKÝ JISTIČ PROTI ZPOŽDĚNÍ API:
             // Pokud zápas podle času už odstartoval (rozdilMinut <= 0), ale API ho ještě 
             // neuzavřelo (status !== "FINISHED"), natvrdo držíme bojový režim bota!
