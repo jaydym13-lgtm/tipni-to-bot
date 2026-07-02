@@ -596,9 +596,10 @@ async function providniApiHeartbeat() {
             // 🛡️ PARSER SKÓRE: Pojistíme každý jeden krok. Pokud API u neodehraného zápasu nepošle score, 
             // JavaScript s otazníky nespadne, bezpečně to přeskočí a bot může v klidu běžet dál.
             if (jeZapasAktivni && match.score && match.score.fullTime && match.score.fullTime.home !== null) {
-                if (isPlayoff && match.score.regularTime && match.score.regularTime.home !== null) {
-                    golyDomaci = parseInt(match.score.regularTime.home);
-                    golyHoste = parseInt(match.score.regularTime.away);
+                // 👑 ENTERPRISE PARSER: Pokud se hraje prodloužení (extraTime), odečteme jeho góly od fullTime, abychom dostali stav po 90. minutě
+                if (isPlayoff && match.score.extraTime && match.score.extraTime.home !== null && match.score.extraTime.home !== undefined) {
+                    golyDomaci = parseInt(match.score.fullTime.home) - parseInt(match.score.extraTime.home);
+                    golyHoste = parseInt(match.score.fullTime.away) - parseInt(match.score.extraTime.away);
                 } else {
                     golyDomaci = parseInt(match.score.fullTime.home);
                     golyHoste = parseInt(match.score.fullTime.away);
