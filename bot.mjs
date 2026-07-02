@@ -558,6 +558,7 @@ async function providniApiHeartbeat() {
         let obsahujeAktivniZapas = false;
         let dosloKStavoveZmene = false;
         let minRozdilDoZapasu = Infinity;
+        let pristiZapasIso = null; // 👑 PŘESUNUTO SEM: Bezpečný vnější rozsah pro ochranu před ReferenceError
 
         for (const match of matches) {
             const apiId = String(match.id);
@@ -578,10 +579,9 @@ async function providniApiHeartbeat() {
                 obsahujeAktivniZapas = true;
             }
 
-            let pristiZapasIso = null; // Globální záchytná kotva nad cyklem matches
             if (rozdilMinut > 0 && rozdilMinut < minRozdilDoZapasu) {
                 minRozdilDoZapasu = rozdilMinut;
-                pristiZapasIso = match.utcDate;
+                pristiZapasIso = match.utcDate; // Čistý zápis do sdílené vnější proměnné
             }
 
             const rawDomaci = match.homeTeam?.name || "Neznámý";
@@ -716,29 +716,16 @@ async function providniApiHeartbeat() {
             console.error("❌ Selhal zápis radarových dat do Firestore:", radarErr);
         }
 
-        // ⏱️ CHIRURGICKÝ ČASOVÝ MANAŽER CYKLU (Synchronizace 6 -> 3 -> 0)
+        // 📡 REAKTIVNÍ CLOUDOVÁ DIAGNOSTIKA: Kontrolu času a spánku plně přebírá Firebase Chronos
         const jeZapasV_OkneBojovehoRezimu = minRozdilDoZapasu <= 6;
-
         if (obsahujeAktivniZapas || jeZapasV_OkneBojovehoRezimu) {
-            console.log(`🚀 BATTLE MODE: Tikám na ostro každé ${RAM_BOT_CONFIG.liveInterval} minuty.`);
-            setTimeout(providniApiHeartbeat, RAM_BOT_CONFIG.liveInterval * 60 * 1000);
+            console.log(`🚀 STATUS: Zápas aktivně běží nebo se blíží výkop. Systém je v pohotovosti.`);
         } else {
-            if (minRozdilDoZapasu <= 35) {
-                const casDoBojovehoRezimu = minRozdilDoZapasu - 6;
-                const finalniSpanekMinut = (casDoBojovehoRezimu > 0 && casDoBojovehoRezimu < RAM_BOT_CONFIG.waitInterval) 
-                    ? casDoBojovehoRezimu 
-                    : RAM_BOT_CONFIG.waitInterval;
-
-                console.log(`⏳ ČEKÁNÍ: Zápas je blízko. Další kontrola situace za ${Math.round(finalniSpanekMinut)} minut.`);
-                setTimeout(providniApiHeartbeat, finalniSpanekMinut * 60 * 1000);
-            } else {
-                console.log(`💤 KLID ZBRANÍ: V dohledných 35 minutách nic nezačíná. Nejbližší zápas je za ${Math.round(minRozdilDoZapasu)} min. Vypínám vnitřní smyčku, Chronos mě vzbudí.`);
-            }
+            console.log(`💤 STATUS: Klid zbraní. Nejbližší zápas je za ${Math.round(minRozdilDoZapasu)} min. Vypínám motor.`);
         }
 
     } catch (err) {
-        console.error("❌ Chyba v heartbeat smyčce, zkouším za minutu:", err);
-        setTimeout(providniApiHeartbeat, 60000);
+        console.error("❌ Kritická chyba v heartbeat smyčce:", err);
     }
 }
 
@@ -748,10 +735,15 @@ async function startEnterpriseApplication() {
     console.log("👑 CLOUD-NATIVE DAEMON: Inicializuji životní cyklus trvalého mozku...");
     console.log("=========================================================================");
 
-    // 1. Spustíme integrovaný Health Check Server pro Render
+    // 1. Spustíme reaktivní spouštěcí server propojený na Firebase Chronos dispečink
     http.createServer((req, res) => {
+        console.log(`📡 PING PŘIJAT: Cloudový plánovač udeřil do serveru. Probouzím RAM a odpaluji Heartbeat...`);
+        
+        // Spustíme kontrolu API asynchronně na pozadí, ať neblokujeme rychlou HTTP odpověď 200 OK pro Firebase
+        providniApiHeartbeat().catch(err => console.error("❌ Chyba při reaktivním spuštění:", err));
+
         res.writeHead(200, { "Content-Type": "text/plain" });
-        res.end("OK - Backend mozek hlídá stadion.");
+        res.end("OK - Reaktivní backend mozek hlídá stadion.");
     }).listen(PORT, () => {
         console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen a připraven pro Render.`);
     });
