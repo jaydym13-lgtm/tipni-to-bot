@@ -26,9 +26,8 @@ const r2Client = new S3Client({
 const BUCKET_NAME = process.env.R2_BUCKET_NAME || "tipni-to-data";
 
 // --- 🔐 INICIALIZACE FIREBASE ADMIN SDK ---
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || "{}");
 admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+    credential: admin.credential.cert("./service-account.json")
 });
 const db = admin.firestore();
 
