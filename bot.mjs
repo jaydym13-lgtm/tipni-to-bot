@@ -500,6 +500,8 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
     await uploadToR2("rozpis.json", rozpisJson);
 
     if (forceWriteHistory) {
+        const historiePromises = [];
+
         for (const uid of Object.keys(RAM_USERS_PROFILES)) {
             const hracovyTipyVsechny = RAM_USERS_TIPS[uid] ? RAM_USERS_TIPS[uid].tipy : {};
             const hracovyTipyOdemcene = {};
@@ -512,7 +514,12 @@ async function rekonstruujAgregaty(forceWriteHistory = false) {
             });
 
             const historieJson = { mapaTipu: hracovyTipyOdemcene, vytvoreno: timestampNow };
-            await uploadToR2(`historie_hrace_${uid}.json`, historieJson);
+            const uploadPromise = uploadToR2(`historie_hrace_${uid}.json`, historieJson);
+            historiePromises.push(uploadPromise);
+        }
+
+        if (historiePromises.length > 0) {
+            await Promise.all(historiePromises);
         }
     }
 
@@ -708,8 +715,10 @@ async function providniApiHeartbeat() {
             };
         } // 🌟 V pořádku uzavřený velký cyklus matches 'for (const match of matches)' bez zbloudilých elementů!
 
-        if (dosloKStavoveZmene || obsahujeAktivniZapas) {
-            console.log("⚡ Detekována změna skóre. Přepočítávám RAM registry...");
+        // 👑 ARCHITEKTONICKÝ UPGRADE: Žebříček počítáme a na R2 posíláme POUZE při reálné změně (gól, start, konec).
+        // Pokud se hraje nudný beton, bot drží stav v RAM a zbytečně nespamuje síť ani R2 disk!
+        if (dosloKStavoveZmene) {
+            console.log("⚡ Detekována reálná událost (gól/start/konec). Přepočítávám RAM registry a pouštím update na R2...");
             await rekonstruujAgregaty(dosloKStavoveZmene);
         }
 
