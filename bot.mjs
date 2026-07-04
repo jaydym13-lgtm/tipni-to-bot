@@ -116,11 +116,13 @@ function emitReadySignalGlobal(streamName) {
         readySignalsGlobal[streamName] = true;
         console.log(`📡 SIGNÁL POŠŤÁKA: Stream [${streamName}] kompletně natekl ze sítě do RAM paměti.`);
         
-        // V momentě, kdy jsou všechny 3 hlavní streamy v pořádku stažené, bezpečně odpalujeme heartbeat loop
         if (readySignalsGlobal.users && readySignalsGlobal.tips && readySignalsGlobal.matches && !apiHeartbeatStartedGlobal) {
             apiHeartbeatStartedGlobal = true;
-            console.log("🚀 POŠŤÁK ODPALUJE HLAVNÍ LOOP: Všechna data jsou bezpečně v RAM. Spouštím neprůstřelný sportovní Heartbeat!");
-            providniApiHeartbeat();
+            console.log("🚀 POŠŤÁK ODPALUJE HLAVNÍ LOOP: Všechna data jsou bezpečně v RAM. Vynucuji úvodní synchronizaci na R2...");
+            
+            rekonstruujAgregaty(true).then(() => {
+                providniApiHeartbeat();
+            }).catch(err => console.error("❌ Selhal úvodní zápis agregátů:", err));
         }
     }
 }
@@ -606,23 +608,29 @@ async function providniApiHeartbeat() {
             let golyDomaci = undefined; let golyHoste = undefined; let postupVal = "";
             const jeZapasAktivni = status === "FINISHED" || status === "IN_PLAY" || status === "PAUSED";
             
-            // 🛡️ PARSER SKÓRE: Pojistíme každý jeden krok. Pokud API u neodehraného zápasu nepošle score, 
-            // JavaScript s otazníky nespadne, bezpečně to přeskočí a bot může v klidu běžet dál.
+            // 🛡️ ULTRA-PROFI PARSER SKÓRE PO 90. MINUTÁCH (OPRAVA PRODLUŽENÍ)
             if (jeZapasAktivni && match.score) {
-                    // 👑 PŘESNÝ STRUKTURÁLNÍ PARSER: Pokud existuje regularTime (stav po 90m u prodloužení), použijeme ho. Jinak bereme fullTime.
-                    if (isPlayoff && match.score.regularTime && match.score.regularTime.home !== null && match.score.regularTime.home !== undefined) {
-                        golyDomaci = parseInt(match.score.regularTime.home);
-                        golyHoste = parseInt(match.score.regularTime.away);
-                    } else if (match.score.fullTime && match.score.fullTime.home !== null && match.score.fullTime.home !== undefined) {
-                        golyDomaci = parseInt(match.score.fullTime.home);
-                        golyHoste = parseInt(match.score.fullTime.away);
-                    }
+                const fTime = match.score.fullTime;
+                const eTime = match.score.extraTime;
 
-                    if (isPlayoff && match.score.winner) {
-                        if (match.score.winner === "HOME_TEAM") postupVal = "domaci";
-                        if (match.score.winner === "AWAY_TEAM") postupVal = "hoste";
+                if (fTime && fTime.home !== null && fTime.home !== undefined) {
+                    if (status === "FINISHED" && match.score.duration === "EXTRA_TIME" && eTime && eTime.home !== null) {
+                        golyDomaci = parseInt(fTime.home) - parseInt(eTime.home);
+                        golyHoste = parseInt(fTime.away) - parseInt(eTime.away);
+                    } else if (status === "FINISHED" && match.score.duration === "PENALTY_SHOOTOUT" && eTime && eTime.home !== null) {
+                        golyDomaci = parseInt(fTime.home) - parseInt(eTime.home);
+                        golyHoste = parseInt(fTime.away) - parseInt(eTime.away);
+                    } else {
+                        golyDomaci = parseInt(fTime.home);
+                        golyHoste = parseInt(fTime.away);
                     }
                 }
+
+                if (isPlayoff && match.score.winner) {
+                    if (match.score.winner === "HOME_TEAM") postupVal = "domaci";
+                    if (match.score.winner === "AWAY_TEAM") postupVal = "hoste";
+                }
+            }
 
             if (status === "IN_PLAY" || status === "PAUSED") {
                 obsahujeAktivniZapas = true;
