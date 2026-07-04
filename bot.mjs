@@ -721,6 +721,7 @@ async function providniApiHeartbeat() {
                 datum: match.utcDate,
                 isPlayoff: stary?.isPlayoff !== undefined ? stary.isPlayoff : isPlayoff,
                 kolo: spravneKoloTurnaje,
+                stage: match.stage || stary?.stage || "",
                 vysledek_domaci: golyDomaci !== undefined ? golyDomaci : stary?.vysledek_domaci,
                 vysledek_hoste: golyHoste !== undefined ? golyHoste : stary?.vysledek_hoste,
                 apiStatus: status,
