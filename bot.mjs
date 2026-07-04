@@ -608,18 +608,24 @@ async function providniApiHeartbeat() {
             let golyDomaci = undefined; let golyHoste = undefined; let postupVal = "";
             const jeZapasAktivni = status === "FINISHED" || status === "IN_PLAY" || status === "PAUSED";
             
-            // 🛡️ ULTRA-PROFI PARSER SKÓRE PO 90. MINUTÁCH (OPRAVA PRODLUŽENÍ)
+            // 🛡️ ULTRA-PROFI PARSER SKÓRE PO 90. MINUTÁCH (OPRAVA PRODLUŽENÍ A PENALTOVÝCH ROZSTŘELŮ)
             if (jeZapasAktivni && match.score) {
                 const fTime = match.score.fullTime;
-                const eTime = match.score.extraTime;
+                const eTime = match.score.extraTime || { home: 0, away: 0 };
+                const pTime = match.score.penalties || { home: 0, away: 0 };
 
                 if (fTime && fTime.home !== null && fTime.home !== undefined) {
-                    if (status === "FINISHED" && match.score.duration === "EXTRA_TIME" && eTime && eTime.home !== null) {
-                        golyDomaci = parseInt(fTime.home) - parseInt(eTime.home);
-                        golyHoste = parseInt(fTime.away) - parseInt(eTime.away);
-                    } else if (status === "FINISHED" && match.score.duration === "PENALTY_SHOOTOUT" && eTime && eTime.home !== null) {
-                        golyDomaci = parseInt(fTime.home) - parseInt(eTime.home);
-                        golyHoste = parseInt(fTime.away) - parseInt(eTime.away);
+                    let extraHome = (eTime.home !== null && eTime.home !== undefined) ? parseInt(eTime.home) : 0;
+                    let extraAway = (eTime.away !== null && eTime.away !== undefined) ? parseInt(eTime.away) : 0;
+                    let penHome = (pTime.home !== null && pTime.home !== undefined) ? parseInt(pTime.home) : 0;
+                    let penAway = (pTime.away !== null && pTime.away !== undefined) ? parseInt(pTime.away) : 0;
+
+                    if (status === "FINISHED" && match.score.duration === "EXTRA_TIME") {
+                        golyDomaci = parseInt(fTime.home) - extraHome;
+                        golyHoste = parseInt(fTime.away) - extraAway;
+                    } else if (status === "FINISHED" && match.score.duration === "PENALTY_SHOOTOUT") {
+                        golyDomaci = parseInt(fTime.home) - extraHome - penHome;
+                        golyHoste = parseInt(fTime.away) - extraAway - penAway;
                     } else {
                         golyDomaci = parseInt(fTime.home);
                         golyHoste = parseInt(fTime.away);
