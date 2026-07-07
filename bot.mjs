@@ -682,7 +682,12 @@ async function providniApiHeartbeat() {
             if (jeToCtyrteKolo) {
                 spravneKoloTurnaje = "4. kolo";
             } else if (isPlayoff) {
-                spravneKoloTurnaje = "Play-off"; // Od čtvrtfinále dál
+                // 🛡️ ENTERPRISE FILTR FÁZÍ: Rozklíčujeme surové API stringy na tvé české názvy kol
+                if (stage === "QUARTER_FINALS") spravneKoloTurnaje = "Čtvrtfinále";
+                else if (stage === "SEMI_FINALS") spravneKoloTurnaje = "Semifinále";
+                else if (stage === "THIRD_PLACE") spravneKoloTurnaje = "Zápas o 3. místo";
+                else if (stage === "FINAL") spravneKoloTurnaje = "Finále";
+                else spravneKoloTurnaje = "Play-off";
             } else if (match.matchday) {
                 spravneKoloTurnaje = `Kolo ${match.matchday}`;
             }
@@ -692,10 +697,11 @@ async function providniApiHeartbeat() {
             const finalHoste = (!stary || stary.hoste === "Neznámý") ? hoste : stary.hoste;
 
             // 💾 AUTOMATICKÝ ZPĚTNÝ ZÁPIS: Jakmile zápas skončí, bot propíše skóre a správný název kola do tvého Firestore.
-            // Tím se ti Kolo 3 i 4. kolo začnou okamžitě samy vyhodnocovat přímo v databázi!
             const detekovanNovyRozlosovanyTym = stary && (stary.domaci === "Neznámý" && domaci !== "Neznámý");
             const jeUkoncenBezVysledkuVDB = status === "FINISHED" && golyDomaci !== undefined && golyHoste !== undefined && (!stary || stary.vysledek_domaci === undefined);
-            const potrebujeOpravitKoloVDB = stary && (stary.kolo === "LAST_32" || stary.kolo === "LAST_16" || (stary.kolo === "Play-off" && jeToCtyrteKolo));
+            
+            // 👑 TOTAL ULTRA JISTIČ: Pokud se název kola v DB liší od nově spočítaného, vynutíme okamžitý opravný přepis!
+            const potrebujeOpravitKoloVDB = stary && (stary.kolo !== spravneKoloTurnaje);
 
             if (detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB) {
                 console.log(`💾 AUTO-SYNC FIREBASE: Aktualizuji zápas ${finalDomaci} - ${finalHoste} na Kolo: ${spravneKoloTurnaje}`);
