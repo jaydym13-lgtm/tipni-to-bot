@@ -17,9 +17,9 @@ const LIGY_API_MAPA = {
     "Chance Liga": { id: "345", provider: "API_SPORTS" },
     "MS ve fotbale": { id: "WC", provider: "FOOTBALL_DATA" },
     "Premier League": { id: "PL", provider: "FOOTBALL_DATA" },
-    "Liga národů": { id: "UNL", provider: "FOOTBALL_DATA" },
-    "Tipsport Extraliga": { id: "TEL", provider: "MANUAL" },
-    "MS v hokeji": { id: "WM", provider: "MANUAL" }
+    "Liga národů": { id: "5", provider: "API_SPORTS" },
+    "Tipsport Extraliga": { id: "359", provider: "API_SPORTS_HOCKEY" },
+    "MS v hokeji": { id: "757", provider: "API_SPORTS_HOCKEY" }
 };
 
 // Seznam lig, které má bot v tomto běhu živě obsluhovat
@@ -695,6 +695,31 @@ async function providniApiHeartbeat() {
                     score: {
                         fullTime: { home: f.goals.home, away: f.goals.away },
                         winner: f.teams.home.winner ? "HOME_TEAM" : (f.teams.away.winner ? "AWAY_TEAM" : null)
+                    }
+                }));
+            } else if (provider === "API_SPORTS_HOCKEY") {
+                if (!apiSportsKey) {
+                    console.log(`⚠️ Chybí API_FOOTBALL_KEY pro Hokej API [${leagueName}]. Přesakuji...`);
+                    continue;
+                }
+                const seasonYear = new Date().getFullYear();
+                const response = await fetch(`https://v1.hockey.api-sports.io/games?league=${leagueApiId}&season=${seasonYear}`, {
+                    headers: { "x-apisports-key": apiSportsKey }
+                });
+                if (!response.ok) throw new Error(`API-Hockey error (${leagueName}): ${response.status}`);
+                const apiData = await response.json();
+                
+                matches = (apiData.response || []).map(g => ({
+                    id: String(g.id),
+                    status: ["FT", "AOT", "AP"].includes(g.status.short) ? "FINISHED" : (["1P", "2P", "3P", "OT", "PT"].includes(g.status.short) ? "IN_PLAY" : "SCHEDULED"),
+                    utcDate: g.date,
+                    homeTeam: { name: g.teams.home.name },
+                    awayTeam: { name: g.teams.away.name },
+                    stage: "REGULAR_SEASON",
+                    matchday: 1,
+                    score: {
+                        fullTime: { home: g.scores.home, away: g.scores.away },
+                        winner: g.scores.home > g.scores.away ? "HOME_TEAM" : (g.scores.away > g.scores.home ? "AWAY_TEAM" : null)
                     }
                 }));
             } else if (provider === "FOOTBALL_DATA") {
