@@ -8,13 +8,24 @@ import http from "http";
 
 import { PRAVIDLA_LIG } from "./rules.js";
 
-// --- ⚙️ PROSTŘEDÍ A KONFIGURACE (Environment Variables) ---
-const LEAGUE_ID = process.env.LEAGUE_ID || "WC";
-const LEAGUE_NAME = process.env.LEAGUE_NAME || "MS ve fotbale";
+// --- ⚙️ PROSTŘEDÍ A MULTI-LEAGUE KONFIGURACE ---
 const SEZONA_ID = process.env.SEZONA_ID || "2026_2027";
-const LIGA_KLIC = LEAGUE_NAME.replace(/ /g, "_");
-const API_KEY = process.env.FOOTBALL_DATA_API_KEY;
 const PORT = process.env.PORT || 8080;
+
+// 🗺️ ČÍSELNÍK SPORTOVNÍCH API PROVIDERŮ A ID SOUTĚŽÍ
+const LIGY_API_MAPA = {
+    "Chance Liga": { id: "345", provider: "API_SPORTS" },
+    "MS ve fotbale": { id: "WC", provider: "FOOTBALL_DATA" },
+    "Premier League": { id: "PL", provider: "FOOTBALL_DATA" },
+    "Tipsport Extraliga": { id: "TEL", provider: "MANUAL" },
+    "MS v hokeji": { id: "WM", provider: "MANUAL" }
+};
+
+// Seznam lig, které má bot v tomto běhu živě obsluhovat
+const SEZNAM_LIG = (process.env.ACTIVE_LEAGUES || "Chance Liga,MS ve fotbale")
+    .split(",")
+    .map(l => l.trim())
+    .filter(Boolean);
 
 // Inicializace Cloudflare R2 Klienta přes AWS S3 SDK
 const r2Client = new S3Client({
@@ -110,10 +121,11 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
 };
 
 // --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD) ---
-async function uploadToR2(filename, jsonData) {
+async function uploadToR2(leagueName, filename, jsonData) {
     try {
         const bodyText = JSON.stringify(jsonData, null, 2);
-        const dynamicPath = `sezony/${SEZONA_ID}/${LIGA_KLIC}/${filename}`;
+        const ligaKlic = String(leagueName).replace(/ /g, "_");
+        const dynamicPath = `sezony/${SEZONA_ID}/${ligaKlic}/${filename}`;
         await r2Client.send(new PutObjectCommand({
             Bucket: BUCKET_NAME,
             Key: dynamicPath,
@@ -121,7 +133,7 @@ async function uploadToR2(filename, jsonData) {
             ContentType: "application/json"
         }));
     } catch (err) {
-        console.error(`❌ Chyba distribuce souboru ${filename} do R2:`, err);
+        console.error(`❌ Chyba distribuce souboru ${filename} (${leagueName}) do R2:`, err);
     }
 }
 
@@ -203,44 +215,52 @@ function inicializujLiveFirestoreStreams() {
           emitReadySignalGlobal("tips");
       }, (err) => console.error("❌ Kritický výpadek databázového streamu sezón:", err));
 
-    console.log(`📡 Spouštím permanentní synchronizaci zápasů z Firestore pro Admin Panel...`);
-    db.collection("ligy").doc(LEAGUE_NAME).collection("zapasy").onSnapshot(snapshot => {
-        snapshot.docChanges().forEach(change => {
-            const matchId = change.doc.id;
-            const data = change.doc.data() || {};
-            
-            if (change.type === "removed") {
-                delete RAM_CENTRAL_MATCHES[matchId];
-            } else {
-                const stary = RAM_CENTRAL_MATCHES[matchId] || {};
-                
-                let isoDatum = stary.datum || new Date().toISOString();
-                if (data.datum) {
-                    isoDatum = typeof data.datum.toDate === 'function' ? data.datum.toDate().toISOString() : new Date(data.datum).toISOString();
-                }
+    console.log(`📡 Spouštím permanentní synchronizaci zápasů z Firestore pro ligy: ${SEZNAM_LIG.join(', ')}...`);
+    
+    SEZNAM_LIG.forEach(leagueName => {
+        if (!RAM_CENTRAL_MATCHES[leagueName]) RAM_CENTRAL_MATCHES[leagueName] = {};
 
-                RAM_CENTRAL_MATCHES[matchId] = {
-                    domaci: data.domaci || stary.domaci || "Neznámý",
-                    hoste: data.hoste || stary.hoste || "Neznámý",
-                    datum: isoDatum,
-                    isPlayoff: data.isPlayoff !== undefined ? data.isPlayoff : (stary.isPlayoff || false),
-                    isTopMatch: data.isTopMatch !== undefined ? data.isTopMatch : (stary.isTopMatch || false),
-                    kolo: data.kolo || stary.kolo || "Šampionát",
-                    vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : stary.vysledek_domaci,
-                    vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : stary.vysledek_hoste,
-                    apiStatus: data.apiStatus || stary.apiStatus || "SCHEDULED",
-                    postup: data.postup || stary.postup || ""
-                };
-            }
-        });
-        rekonstruujAgregaty();
-        emitReadySignalGlobal("matches");
-    }, (err) => console.error("❌ Chyba streamu zápasů z Firestore:", err));
+        db.collection("ligy").doc(leagueName).collection("zapasy").onSnapshot(snapshot => {
+            snapshot.docChanges().forEach(change => {
+                const matchId = change.doc.id;
+                const data = change.doc.data() || {};
+                
+                if (change.type === "removed") {
+                    delete RAM_CENTRAL_MATCHES[leagueName][matchId];
+                } else {
+                    const stary = RAM_CENTRAL_MATCHES[leagueName][matchId] || {};
+                    
+                    let isoDatum = stary.datum || new Date().toISOString();
+                    if (data.datum) {
+                        isoDatum = typeof data.datum.toDate === 'function' ? data.datum.toDate().toISOString() : new Date(data.datum).toISOString();
+                    }
+
+                    RAM_CENTRAL_MATCHES[leagueName][matchId] = {
+                        domaci: data.domaci || stary.domaci || "Neznámý",
+                        hoste: data.hoste || stary.hoste || "Neznámý",
+                        datum: isoDatum,
+                        isPlayoff: data.isPlayoff !== undefined ? data.isPlayoff : (stary.isPlayoff || false),
+                        isTopMatch: data.isTopMatch !== undefined ? data.isTopMatch : (stary.isTopMatch || false),
+                        kolo: data.kolo || stary.kolo || "Šampionát",
+                        vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : stary.vysledek_domaci,
+                        vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : stary.vysledek_hoste,
+                        apiStatus: data.apiStatus || stary.apiStatus || "SCHEDULED",
+                        postup: data.postup || stary.postup || ""
+                    };
+                }
+            });
+            rekonstruujAgregatyVsechny();
+            emitReadySignalGlobal("matches");
+        }, (err) => console.error(`❌ Chyba streamu zápasů pro ${leagueName}:`, err));
+    });
 }
 
 // --- 🧮 AGREGÁTOR PAMĚTI ---
-async function rekonstruujAgregaty(forceWriteHistory = false) {
-    const timestampNow = new Date().toISOString();
+async function rekonstruujAgregatyVsechny(forceWriteHistory = false) {
+    for (const leagueName of SEZNAM_LIG) {
+        await rekonstruujAgregatyProLigu(leagueName, forceWriteHistory);
+    }
+}
 
     // 🛡️ ULTRA-PROFI ASYNCHRONNÍ JISTIČ (Konec penalizacím -54b):
     // Pokud Firestore streamy ještě nedokončily prvotní stažení uživatelů nebo tipů,
