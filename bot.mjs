@@ -643,6 +643,31 @@ async function providniApiHeartbeat() {
             continue;
         }
 
+        // 🧠 SMART SCHEDULER (DIETA API LIMITŮ): Kontrola, zda má ligu smysl dotazovat
+        const centralneZapasyLigy = Object.values(RAM_CENTRAL_MATCHES[leagueName] || {});
+        const maAktivniZapasVRam = centralneZapasyLigy.some(z => z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED");
+        const nyniMs = Date.now();
+        const najblizsiZapasMs = centralneZapasyLigy
+            .filter(z => z.apiStatus === "SCHEDULED" && Date.parse(z.datum) > nyniMs)
+            .reduce((min, z) => Math.min(min, Date.parse(z.datum)), Infinity);
+
+        const minutyDoDalsihoZapasu = (najblizsiZapasMs - nyniMs) / (1000 * 60);
+        const maBudouciZapasBlizko = minutyDoDalsihoZapasu <= 120; // 2 hodiny do výkopu/buly nebo méně
+        const maPrazdnouRam = centralneZapasyLigy.length === 0;
+
+        // Pokud máme rozpis v RAM, nehrají se žádné živé zápasy a další zápas je daleko -> PŘESAKUJEME API
+        if (!maPrazdnouRam && !maAktivniZapasVRam && !maBudouciZapasBlizko) {
+            const hodinyDoZapasu = Math.round(minutyDoDalsihoZapasu / 60);
+            const textCasu = isFinite(hodinyDoZapasu) ? `${hodinyDoZapasu} hod` : "nedohlednu";
+            console.log(`💤 SMART SCHEDULER [${leagueName}]: Zápas v ${textCasu}. Šetřím API kredity a přesakuji dotaz.`);
+            
+            if (minutyDoDalsihoZapasu < minRozdilDoZapasu) {
+                minRozdilDoZapasu = minutyDoDalsihoZapasu;
+                pristiZapasIso = new Date(najblizsiZapasMs).toISOString();
+            }
+            continue;
+        }
+
         try {
             let matches = [];
 
