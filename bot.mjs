@@ -262,11 +262,10 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
 
-    if (Object.keys(RAM_USERS_PROFILES).length === 0 || Object.keys(RAM_USERS_TIPS).length === 0) {
-        console.log(`⏳ JISTIČ AGREGÁTU [${leagueName}]: Paměť RAM se stále plní ze sítě. Stornuji výpočet...`);
+    if (!readySignalsGlobal.users || !readySignalsGlobal.matches || !readySignalsGlobal.tips) {
+        console.log(`⏳ JISTIČ AGREGÁTU [${leagueName}]: Čekám na kompletní načtení Firestore streamů do RAM...`);
         return;
     }
-
     const leagueDoc = await db.collection("ligy").doc(leagueName).get().catch(() => null);
     const realLeagueData = leagueDoc && leagueDoc.exists ? leagueDoc.data() : null;
 
