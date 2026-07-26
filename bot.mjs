@@ -17,6 +17,7 @@ const LIGY_API_MAPA = {
     "Chance Liga": { id: "345", provider: "API_SPORTS" },
     "MS ve fotbale": { id: "WC", provider: "FOOTBALL_DATA" },
     "Premier League": { id: "PL", provider: "FOOTBALL_DATA" },
+    "Liga národů": { id: "UNL", provider: "FOOTBALL_DATA" },
     "Tipsport Extraliga": { id: "TEL", provider: "MANUAL" },
     "MS v hokeji": { id: "WM", provider: "MANUAL" }
 };
