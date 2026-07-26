@@ -151,7 +151,7 @@ function emitReadySignalGlobal(streamName) {
             apiHeartbeatStartedGlobal = true;
             console.log("🚀 POŠŤÁK ODPALUJE HLAVNÍ LOOP: Všechna data jsou bezpečně v RAM. Vynucuji úvodní synchronizaci na R2...");
             
-            rekonstruujAgregaty(true).then(() => {
+            rekonstruujAgregatyVsechny(true).then(() => {
                 providniApiHeartbeat();
             }).catch(err => console.error("❌ Selhal úvodní zápis agregátů:", err));
         }
