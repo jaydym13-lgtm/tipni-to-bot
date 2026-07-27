@@ -14,10 +14,10 @@ const PORT = process.env.PORT || 8080;
 
 // 🗺️ ČÍSELNÍK SPORTOVNÍCH API PROVIDERŮ A ID SOUTĚŽÍ
 const LIGY_API_MAPA = {
-    "Chance Liga": { id: "208", provider: "FOTMOB" },
-    "MS ve fotbale": { id: "WC", provider: "FOOTBALL_DATA" },
-    "Premier League": { id: "PL", provider: "FOOTBALL_DATA" },
-    "Liga národů": { id: "10216", provider: "FOTMOB" },
+    "Chance Liga": { id: "345", provider: "RAPID_API" },
+    "MS ve fotbale": { id: "1", provider: "RAPID_API" },
+    "Premier League": { id: "39", provider: "RAPID_API" },
+    "Liga národů": { id: "5", provider: "RAPID_API" },
     "Tipsport Extraliga": { id: "359", provider: "MANUAL" },
     "MS v hokeji": { id: "757", provider: "MANUAL" }
 };
@@ -672,61 +672,50 @@ async function providniApiHeartbeat() {
         try {
             let matches = [];
 
-            if (provider === "FOTMOB") {
-                // ⚽ AUTOMATICKÝ ENGINE FOTMOB (S opravenými ID lig)
-                let workerUrl = (process.env.WORKER_PROXY_URL || "").trim().replace(/\/+$/, "");
-                const fotmobTarget = `https://www.fotmob.com/api/leagues?id=${leagueApiId}`;
-                const requestUrl = workerUrl ? `${workerUrl}?url=${encodeURIComponent(fotmobTarget)}` : fotmobTarget;
-
-                const response = await fetch(requestUrl);
-                if (!response.ok) throw new Error(`FotMob error (${leagueName}): ${response.status}`);
-                const apiData = await response.json();
-                
-                let rawMatches = [];
-                if (apiData.fixtures && Array.isArray(apiData.fixtures)) {
-                    rawMatches = apiData.fixtures;
-                } else if (apiData.fixtures && apiData.fixtures.allMatches) {
-                    rawMatches = apiData.fixtures.allMatches;
-                } else if (apiData.matches && apiData.matches.allMatches) {
-                    rawMatches = apiData.matches.allMatches;
-                } else if (apiData.overview && apiData.overview.leagueMatches) {
-                    rawMatches = apiData.overview.leagueMatches;
+            if (provider === "RAPID_API") {
+                const rapidApiKey = process.env.RAPIDAPI_KEY;
+                if (!rapidApiKey) {
+                    console.log(`⚠️ Chybí RAPIDAPI_KEY pro [${leagueName}]. Přesakuji...`);
+                    continue;
                 }
 
-                console.log(`🔎 AUTOMATICKÝ FOTMOB ENGINE [${leagueName}]: Načteno ${rawMatches.length} reálných zápasů.`);
-
-                matches = rawMatches.map(m => {
-                    const isFinished = m.status?.finished || m.status?.type === "finished" || (m.status?.scoreStr && m.status.scoreStr.includes("-"));
-                    const isLive = m.status?.started && !m.status?.finished;
-                    const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
-                    
-                    let homeScore = undefined;
-                    let awayScore = undefined;
-                    if (m.home?.score !== undefined && m.away?.score !== undefined) {
-                        homeScore = parseInt(m.home.score);
-                        awayScore = parseInt(m.away.score);
-                    } else if (m.status?.scoreStr) {
-                        const parts = m.status.scoreStr.split("-").map(p => parseInt(p.trim()));
-                        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-                            homeScore = parts[0];
-                            awayScore = parts[1];
-                        }
+                // ⚽ Volání přes Smart API (Free Football API Data)
+                const response = await fetch(`https://free-api-live-football-data.p.rapidapi.com/football-get-all-matches-by-league?league_id=${leagueApiId}`, {
+                    headers: {
+                        "x-rapidapi-key": rapidApiKey,
+                        "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com"
                     }
+                });
 
-                    const rawHome = m.home?.name || m.homeName || "Neznámý";
-                    const rawAway = m.away?.name || m.awayName || "Neznámý";
+                if (!response.ok) throw new Error(`RapidAPI error (${leagueName}): ${response.status}`);
+                const apiData = await response.json();
+                const rawItems = apiData.response || apiData.data || apiData.status || [];
+
+                console.log(`🔎 RAPID-API ENGINE [${leagueName}]: Načteno ${rawItems.length} reálných zápasů.`);
+
+                matches = (Array.isArray(rawItems) ? rawItems : []).map(item => {
+                    const fixture = item.fixture || item || {};
+                    const teams = item.teams || {};
+                    const goals = item.goals || {};
+
+                    const isFinished = fixture.status?.short === "FT" || fixture.status === "FINISHED";
+                    const isLive = fixture.status?.short === "1H" || fixture.status?.short === "2H" || fixture.status === "IN_PLAY";
+                    const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
+
+                    const rawHome = teams.home?.name || item.home_name || "Neznámý";
+                    const rawAway = teams.away?.name || item.away_name || "Neznámý";
 
                     return {
-                        id: String(m.id),
+                        id: String(fixture.id || item.match_id || Math.random()),
                         status: statusStr,
-                        utcDate: m.status?.utcTime || m.time || new Date().toISOString(),
+                        utcDate: fixture.date || item.match_time || new Date().toISOString(),
                         homeTeam: { name: slovnikTymu[rawHome] || rawHome },
                         awayTeam: { name: slovnikTymu[rawAway] || rawAway },
                         stage: "GROUP_STAGE",
-                        matchday: m.round || m.roundName ? parseInt(String(m.round || m.roundName).replace(/[^0-9]/g, '')) || 1 : 1,
+                        matchday: parseInt(item.round) || 1,
                         score: {
-                            fullTime: { home: homeScore, away: awayScore },
-                            winner: (homeScore > awayScore) ? "HOME_TEAM" : ((awayScore > homeScore) ? "AWAY_TEAM" : null)
+                            fullTime: { home: goals.home ?? item.home_score, away: goals.away ?? item.away_score },
+                            winner: goals.home > goals.away ? "HOME_TEAM" : (goals.away > goals.home ? "AWAY_TEAM" : null)
                         }
                     };
                 });
