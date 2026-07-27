@@ -14,10 +14,10 @@ const PORT = process.env.PORT || 8080;
 
 // 🗺️ ČÍSELNÍK SPORTOVNÍCH API PROVIDERŮ A ID SOUTĚŽÍ
 const LIGY_API_MAPA = {
-    "Chance Liga": { id: "10216", provider: "FOTMOB" },
+    "Chance Liga": { id: "208", provider: "FOTMOB" },
     "MS ve fotbale": { id: "WC", provider: "FOOTBALL_DATA" },
     "Premier League": { id: "PL", provider: "FOOTBALL_DATA" },
-    "Liga národů": { id: "9807", provider: "FOTMOB" },
+    "Liga národů": { id: "10216", provider: "FOTMOB" },
     "Tipsport Extraliga": { id: "359", provider: "MANUAL" },
     "MS v hokeji": { id: "757", provider: "MANUAL" }
 };
@@ -673,7 +673,7 @@ async function providniApiHeartbeat() {
             let matches = [];
 
             if (provider === "FOTMOB") {
-                // ⚽ FOTMOB VIA CLOUDFLARE WORKER PROXY (Čistá adresa bez 404)
+                // ⚽ AUTOMATICKÝ ENGINE FOTMOB (S opravenými ID lig)
                 let workerUrl = (process.env.WORKER_PROXY_URL || "").trim().replace(/\/+$/, "");
                 const fotmobTarget = `https://www.fotmob.com/api/leagues?id=${leagueApiId}`;
                 const requestUrl = workerUrl ? `${workerUrl}?url=${encodeURIComponent(fotmobTarget)}` : fotmobTarget;
@@ -683,17 +683,17 @@ async function providniApiHeartbeat() {
                 const apiData = await response.json();
                 
                 let rawMatches = [];
-                if (apiData.overview && apiData.overview.leagueMatches) {
-                    rawMatches = apiData.overview.leagueMatches;
-                } else if (apiData.matches && apiData.matches.allMatches) {
-                    rawMatches = apiData.matches.allMatches;
-                } else if (apiData.fixtures && Array.isArray(apiData.fixtures)) {
+                if (apiData.fixtures && Array.isArray(apiData.fixtures)) {
                     rawMatches = apiData.fixtures;
                 } else if (apiData.fixtures && apiData.fixtures.allMatches) {
                     rawMatches = apiData.fixtures.allMatches;
+                } else if (apiData.matches && apiData.matches.allMatches) {
+                    rawMatches = apiData.matches.allMatches;
+                } else if (apiData.overview && apiData.overview.leagueMatches) {
+                    rawMatches = apiData.overview.leagueMatches;
                 }
 
-                console.log(`🔎 PROXY FOTMOB ENGINE [${leagueName}]: Načteno ${rawMatches.length} zápasů z Cloudflare.`);
+                console.log(`🔎 AUTOMATICKÝ FOTMOB ENGINE [${leagueName}]: Načteno ${rawMatches.length} reálných zápasů.`);
 
                 matches = rawMatches.map(m => {
                     const isFinished = m.status?.finished || m.status?.type === "finished" || (m.status?.scoreStr && m.status.scoreStr.includes("-"));
