@@ -673,9 +673,9 @@ async function providniApiHeartbeat() {
             let matches = [];
 
             if (provider === "FOTMOB") {
-                // ⚽ FOTMOB VIA CLOUDFLARE WORKER PROXY (Unbreakable 0 Kč)
-                const workerUrl = process.env.WORKER_PROXY_URL;
-                const fotmobTarget = `https://www.fotmob.com/api/leagues?id=${leagueApiId}&ccode3=CZE`;
+                // ⚽ FOTMOB VIA CLOUDFLARE WORKER PROXY (Čistá adresa bez 404)
+                let workerUrl = (process.env.WORKER_PROXY_URL || "").trim().replace(/\/+$/, "");
+                const fotmobTarget = `https://www.fotmob.com/api/leagues?id=${leagueApiId}`;
                 const requestUrl = workerUrl ? `${workerUrl}?url=${encodeURIComponent(fotmobTarget)}` : fotmobTarget;
 
                 const response = await fetch(requestUrl);
@@ -687,8 +687,10 @@ async function providniApiHeartbeat() {
                     rawMatches = apiData.overview.leagueMatches;
                 } else if (apiData.matches && apiData.matches.allMatches) {
                     rawMatches = apiData.matches.allMatches;
-                } else if (apiData.fixtures) {
+                } else if (apiData.fixtures && Array.isArray(apiData.fixtures)) {
                     rawMatches = apiData.fixtures;
+                } else if (apiData.fixtures && apiData.fixtures.allMatches) {
+                    rawMatches = apiData.fixtures.allMatches;
                 }
 
                 console.log(`🔎 PROXY FOTMOB ENGINE [${leagueName}]: Načteno ${rawMatches.length} zápasů z Cloudflare.`);
