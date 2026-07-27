@@ -679,9 +679,13 @@ async function providniApiHeartbeat() {
                 }
                 const seasonYear = new Date().getFullYear();
                 } else if (provider === "FOTMOB") {
-                // ⚽ UNLIMITED FOTMOB ENGINE (Bez limitation paywallu)
-                const response = await fetch(`https://www.fotmob.com/api/leagues?id=${leagueApiId}`, {
-                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+                // ⚽ UNLIMITED FOTMOB ENGINE (S maskovanou prohlížečovou hlavičkou)
+                const response = await fetch(`https://www.fotmob.com/api/leagues?id=${leagueApiId}&ccode3=CZE`, {
+                    headers: { 
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                        "Referer": "https://www.fotmob.com/",
+                        "Accept": "application/json, text/plain, */*"
+                    }
                 });
                 if (!response.ok) throw new Error(`FotMob error (${leagueName}): ${response.status}`);
                 const apiData = await response.json();
