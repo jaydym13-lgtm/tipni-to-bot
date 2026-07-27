@@ -673,11 +673,11 @@ async function providniApiHeartbeat() {
             let matches = [];
 
             if (provider === "CZECH_AUTOMATED") {
-                // ⚽ AUTOMATICKÝ PARSER ČESKÉ LIGY (Bez jakýchkoliv vymyšlených záložních dat)
+                // ⚽ AUTOMATICKÝ ČESKÝ ENGINE (Správná doména + diagnostika)
                 let rawList = [];
 
                 try {
-                    const response = await fetch("https://sdeleni.idnes.cz/fotbal/databanka/rozpis.aspx?id=100", {
+                    const response = await fetch("https://fotbal.idnes.cz/databanka/rozpis.aspx?id=100", {
                         headers: { 
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
                             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
@@ -686,15 +686,18 @@ async function providniApiHeartbeat() {
 
                     if (response.ok) {
                         const htmlText = await response.text();
-                        const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-                        let rowMatch;
-
-                        while ((rowMatch = rowRegex.exec(htmlText)) !== null) {
-                            const row = rowMatch[1];
-                            const teams = [...row.matchAll(/class="[^"]*team-name[^"]*"[^>]*>([^<]+)</gi)].map(m => m[1].trim());
-                            const scoreMatch = row.match(/(\d+)\s*:\s*(\d+)/);
-                            const roundMatch = row.match(/(\d+)\.\s*kolo/i);
-                            const dateMatch = row.match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})?\s*(\d{1,2})?:?(\d{2})?/);
+                        
+                        // Robustní parsování odkazů na týmy a skóre
+                        const matchBlocks = htmlText.split(/<tr[^>]*>/gi).slice(1);
+                        
+                        for (const block of matchBlocks) {
+                            const teamMatches = [...block.matchAll(/<a[^>]*class="[^"]*team-[^"]*"[^>]*>([^<]+)<\/a>/gi)].map(m => m[1].trim());
+                            const fallbackTeams = [...block.matchAll(/<a[^>]*href="[^"]*databanka\/klub[^"]*"[^>]*>([^<]+)<\/a>/gi)].map(m => m[1].trim());
+                            
+                            const teams = teamMatches.length >= 2 ? teamMatches : fallbackTeams;
+                            const scoreMatch = block.match(/(\d+)\s*:\s*(\d+)/);
+                            const roundMatch = block.match(/(\d+)\.\s*kolo/i);
+                            const dateMatch = block.match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})?\s*(\d{1,2})?:?(\d{2})?/);
 
                             if (teams.length >= 2) {
                                 const homeName = slovnikTymu[teams[0]] || teams[0];
@@ -725,7 +728,7 @@ async function providniApiHeartbeat() {
                                     utcDate: isoDate,
                                     homeTeam: { name: homeName },
                                     awayTeam: { name: awayName },
-                                    stage: "GROUP_STAGE", // 🎯 OPRAVA: Vždy základní část (žádné PLAY-OFF)
+                                    stage: "GROUP_STAGE",
                                     matchday: koloNum,
                                     score: {
                                         fullTime: { home: homeScore, away: awayScore },
@@ -734,6 +737,12 @@ async function providniApiHeartbeat() {
                                 });
                             }
                         }
+
+                        if (rawList.length === 0) {
+                            console.log(`⚠️ PARSER DIAGNOSTIKA: Server vrátil HTML o délce ${htmlText.length} znaků, ale regex nenašel dvojice. Ukázka HTML:`, htmlText.substring(0, 300));
+                        }
+                    } else {
+                        console.error(`❌ HTTP chyba iDnes: ${response.status}`);
                     }
                 } catch (err) {
                     console.error(`❌ Chyba autostahování české ligy:`, err);
