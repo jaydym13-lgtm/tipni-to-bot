@@ -678,11 +678,30 @@ async function providniApiHeartbeat() {
                     continue;
                 }
                 const seasonYear = new Date().getFullYear();
-                const response = await fetch(`https://v3.football.api-sports.io/fixtures?league=${leagueApiId}&season=${seasonYear}`, {
+                let response = await fetch(`https://v3.football.api-sports.io/fixtures?league=${leagueApiId}&season=${seasonYear}`, {
                     headers: { "x-apisports-key": apiSportsKey }
                 });
                 if (!response.ok) throw new Error(`API-Sports error (${leagueName}): ${response.status}`);
-                const apiData = await response.json();
+                let apiData = await response.json();
+
+                console.log(`🔎 DIAGNOSTIKA API-SPORTS [${leagueName} - Sezóna ${seasonYear}]: Nalezeno zápasů: ${apiData.results || 0}`, apiData.errors && Object.keys(apiData.errors).length > 0 ? `Chyby API: ${JSON.stringify(apiData.errors)}` : "");
+
+                // 🔄 FALLBACK ENGINE: Pokud rok 2026 vrátí 0 zápasů, zkusíme okamžitě ročník 2025
+                if ((!apiData.response || apiData.response.length === 0) && (!apiData.errors || Object.keys(apiData.errors).length === 0)) {
+                    const fallbackYear = seasonYear - 1;
+                    console.log(`⚠️ API-Sports pro rok ${seasonYear} vrátilo 0 zápasů. Zkouším záložní sezónu ${fallbackYear}...`);
+                    
+                    const responseFallback = await fetch(`https://v3.football.api-sports.io/fixtures?league=${leagueApiId}&season=${fallbackYear}`, {
+                        headers: { "x-apisports-key": apiSportsKey }
+                    });
+                    if (responseFallback.ok) {
+                        const fallbackData = await responseFallback.json();
+                        console.log(`🔎 DIAGNOSTIKA ZÁLOŽNÍ [${leagueName} - Sezóna ${fallbackYear}]: Nalezeno zápasů: ${fallbackData.results || 0}`);
+                        if (fallbackData.response && fallbackData.response.length > 0) {
+                            apiData = fallbackData;
+                        }
+                    }
+                }
                 
                 matches = (apiData.response || []).map(f => ({
                     id: String(f.fixture.id),
