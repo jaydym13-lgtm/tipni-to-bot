@@ -14,10 +14,10 @@ const PORT = process.env.PORT || 8080;
 
 // 🗺️ ČÍSELNÍK SPORTOVNÍCH API PROVIDERŮ A ID SOUTĚŽÍ
 const LIGY_API_MAPA = {
-    "Chance Liga": { id: "1", provider: "CZECH_AUTOMATED" },
+    "Chance Liga": { id: "10216", provider: "FOTMOB" },
     "MS ve fotbale": { id: "WC", provider: "FOOTBALL_DATA" },
     "Premier League": { id: "PL", provider: "FOOTBALL_DATA" },
-    "Liga národů": { id: "4881", provider: "THESPORTSDB" },
+    "Liga národů": { id: "9807", provider: "FOTMOB" },
     "Tipsport Extraliga": { id: "359", provider: "MANUAL" },
     "MS v hokeji": { id: "757", provider: "MANUAL" }
 };
@@ -672,56 +672,62 @@ async function providniApiHeartbeat() {
         try {
             let matches = [];
 
-            if (provider === "CZECH_AUTOMATED") {
-                // ⚽ AUTOMATICKÝ ENGINE (Přímé rozhraní Chance Ligy)
-                let rawList = [];
+            if (provider === "FOTMOB") {
+                // ⚽ FOTMOB VIA CLOUDFLARE WORKER PROXY (Unbreakable 0 Kč)
+                const workerUrl = process.env.WORKER_PROXY_URL;
+                const fotmobTarget = `https://www.fotmob.com/api/leagues?id=${leagueApiId}&ccode3=CZE`;
+                const requestUrl = workerUrl ? `${workerUrl}?url=${encodeURIComponent(fotmobTarget)}` : fotmobTarget;
 
-                try {
-                    const response = await fetch("https://is.fotbal.cz/api/v1/public/competitions/matches?competitionId=1&season=2026", {
-                        headers: { 
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                            "Accept": "application/json"
-                        }
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        const items = data.matches || data.data || data || [];
-
-                        if (Array.isArray(items)) {
-                            rawList = items.map(m => {
-                                const homeName = slovnikTymu[m.homeTeamName] || m.homeTeamName || m.homeTeam?.name || "Neznámý";
-                                const awayName = slovnikTymu[m.awayTeamName] || m.awayTeamName || m.awayTeam?.name || "Neznámý";
-                                const isFinished = m.status === "FINISHED" || m.state === "FINISHED" || (m.homeScore !== null && m.homeScore !== undefined && m.awayScore !== null && m.awayScore !== undefined);
-                                const koloNum = parseInt(m.round || m.matchday) || 1;
-
-                                return {
-                                    id: String(m.id || `cl_${koloNum}_${homeName}_${awayName}`),
-                                    status: isFinished ? "FINISHED" : "SCHEDULED",
-                                    utcDate: m.matchDate || m.date || new Date().toISOString(),
-                                    homeTeam: { name: homeName },
-                                    awayTeam: { name: awayName },
-                                    stage: "GROUP_STAGE",
-                                    matchday: koloNum,
-                                    score: {
-                                        fullTime: { 
-                                            home: isFinished ? parseInt(m.homeScore) : undefined, 
-                                            away: isFinished ? parseInt(m.awayScore) : undefined 
-                                        },
-                                        winner: isFinished ? (m.homeScore > m.awayScore ? "HOME_TEAM" : (m.awayScore > m.homeScore ? "AWAY_TEAM" : null)) : null
-                                    }
-                                };
-                            });
-                        }
-                    } else {
-                        console.error(`❌ HTTP chyba rozhraní soutěže: ${response.status}`);
-                    }
-                } catch (err) {
-                    console.error(`❌ Chyba načítání dat české ligy:`, err);
+                const response = await fetch(requestUrl);
+                if (!response.ok) throw new Error(`FotMob error (${leagueName}): ${response.status}`);
+                const apiData = await response.json();
+                
+                let rawMatches = [];
+                if (apiData.overview && apiData.overview.leagueMatches) {
+                    rawMatches = apiData.overview.leagueMatches;
+                } else if (apiData.matches && apiData.matches.allMatches) {
+                    rawMatches = apiData.matches.allMatches;
+                } else if (apiData.fixtures) {
+                    rawMatches = apiData.fixtures;
                 }
 
-                console.log(`🔎 AUTOMATICKÝ ČESKÝ ENGINE [${leagueName}]: Načteno ${rawList.length} reálných zápasů.`);
-                matches = rawList;
+                console.log(`🔎 PROXY FOTMOB ENGINE [${leagueName}]: Načteno ${rawMatches.length} zápasů z Cloudflare.`);
+
+                matches = rawMatches.map(m => {
+                    const isFinished = m.status?.finished || m.status?.type === "finished" || (m.status?.scoreStr && m.status.scoreStr.includes("-"));
+                    const isLive = m.status?.started && !m.status?.finished;
+                    const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
+                    
+                    let homeScore = undefined;
+                    let awayScore = undefined;
+                    if (m.home?.score !== undefined && m.away?.score !== undefined) {
+                        homeScore = parseInt(m.home.score);
+                        awayScore = parseInt(m.away.score);
+                    } else if (m.status?.scoreStr) {
+                        const parts = m.status.scoreStr.split("-").map(p => parseInt(p.trim()));
+                        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                            homeScore = parts[0];
+                            awayScore = parts[1];
+                        }
+                    }
+
+                    const rawHome = m.home?.name || m.homeName || "Neznámý";
+                    const rawAway = m.away?.name || m.awayName || "Neznámý";
+
+                    return {
+                        id: String(m.id),
+                        status: statusStr,
+                        utcDate: m.status?.utcTime || m.time || new Date().toISOString(),
+                        homeTeam: { name: slovnikTymu[rawHome] || rawHome },
+                        awayTeam: { name: slovnikTymu[rawAway] || rawAway },
+                        stage: "GROUP_STAGE",
+                        matchday: m.round || m.roundName ? parseInt(String(m.round || m.roundName).replace(/[^0-9]/g, '')) || 1 : 1,
+                        score: {
+                            fullTime: { home: homeScore, away: awayScore },
+                            winner: (homeScore > awayScore) ? "HOME_TEAM" : ((awayScore > homeScore) ? "AWAY_TEAM" : null)
+                        }
+                    };
+                });
             } else if (provider === "FOOTBALL_DATA") {
                 if (!footballDataKey) {
                     console.log(`⚠️ Chybí FOOTBALL_DATA_API_KEY pro [${leagueName}]. Přesakuji...`);
