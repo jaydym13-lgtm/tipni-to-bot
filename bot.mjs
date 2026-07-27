@@ -14,10 +14,10 @@ const PORT = process.env.PORT || 8080;
 
 // 🗺️ ČÍSELNÍK SPORTOVNÍCH API PROVIDERŮ A ID SOUTĚŽÍ
 const LIGY_API_MAPA = {
-    "Chance Liga": { id: "345", provider: "API_SPORTS" },
+    "Chance Liga": { id: "10216", provider: "FOTMOB" },
     "MS ve fotbale": { id: "WC", provider: "FOOTBALL_DATA" },
     "Premier League": { id: "PL", provider: "FOOTBALL_DATA" },
-    "Liga národů": { id: "5", provider: "API_SPORTS" },
+    "Liga národů": { id: "9807", provider: "FOTMOB" },
     "Tipsport Extraliga": { id: "359", provider: "API_SPORTS_HOCKEY" },
     "MS v hokeji": { id: "757", provider: "API_SPORTS_HOCKEY" }
 };
@@ -678,55 +678,86 @@ async function providniApiHeartbeat() {
                     continue;
                 }
                 const seasonYear = new Date().getFullYear();
-                let response = await fetch(`https://v3.football.api-sports.io/fixtures?league=${leagueApiId}&season=${seasonYear}`, {
-                    headers: { "x-apisports-key": apiSportsKey }
+                } else if (provider === "FOTMOB") {
+                // ⚽ UNLIMITED FOTMOB ENGINE (Bez limitation paywallu)
+                const response = await fetch(`https://www.fotmob.com/api/leagues?id=${leagueApiId}`, {
+                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
                 });
-                if (!response.ok) throw new Error(`API-Sports error (${leagueName}): ${response.status}`);
-                let apiData = await response.json();
+                if (!response.ok) throw new Error(`FotMob error (${leagueName}): ${response.status}`);
+                const apiData = await response.json();
+                
+                let rawMatches = [];
+                if (apiData.matches && apiData.matches.allMatches) {
+                    rawMatches = apiData.matches.allMatches;
+                } else if (apiData.fixtures) {
+                    rawMatches = apiData.fixtures;
+                } else if (apiData.overview && apiData.overview.leagueMatches) {
+                    rawMatches = apiData.overview.leagueMatches;
+                }
 
-                console.log(`🔎 DIAGNOSTIKA API-SPORTS [${leagueName} - Sezóna ${seasonYear}]: Nalezeno zápasů: ${apiData.results || 0}`, apiData.errors && Object.keys(apiData.errors).length > 0 ? `Chyby API: ${JSON.stringify(apiData.errors)}` : "");
+                console.log(`🔎 DIAGNOSTIKA FOTMOB [${leagueName}]: Nalezeno zápasů: ${rawMatches.length}`);
 
-                // 🔄 FALLBACK ENGINE: Pokud rok 2026 vrátí 0 zápasů, zkusíme okamžitě ročník 2025
-                if ((!apiData.response || apiData.response.length === 0) && (!apiData.errors || Object.keys(apiData.errors).length === 0)) {
-                    const fallbackYear = seasonYear - 1;
-                    console.log(`⚠️ API-Sports pro rok ${seasonYear} vrátilo 0 zápasů. Zkouším záložní sezónu ${fallbackYear}...`);
+                matches = rawMatches.map(m => {
+                    const isFinished = m.status?.finished || m.status?.type === "finished" || (m.status?.scoreStr && m.status.scoreStr.includes("-"));
+                    const isLive = m.status?.started && !m.status?.finished;
+                    const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
                     
-                    const responseFallback = await fetch(`https://v3.football.api-sports.io/fixtures?league=${leagueApiId}&season=${fallbackYear}`, {
-                        headers: { "x-apisports-key": apiSportsKey }
-                    });
-                    if (responseFallback.ok) {
-                        const fallbackData = await responseFallback.json();
-                        console.log(`🔎 DIAGNOSTIKA ZÁLOŽNÍ [${leagueName} - Sezóna ${fallbackYear}]: Nalezeno zápasů: ${fallbackData.results || 0}`);
-                        if (fallbackData.response && fallbackData.response.length > 0) {
-                            apiData = fallbackData;
+                    let homeScore = undefined;
+                    let awayScore = undefined;
+                    if (m.home?.score !== undefined && m.away?.score !== undefined) {
+                        homeScore = parseInt(m.home.score);
+                        awayScore = parseInt(m.away.score);
+                    } else if (m.status?.scoreStr) {
+                        const parts = m.status.scoreStr.split("-").map(p => parseInt(p.trim()));
+                        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                            homeScore = parts[0];
+                            awayScore = parts[1];
                         }
                     }
-                }
-                
-                matches = (apiData.response || []).map(f => ({
-                    id: String(f.fixture.id),
-                    status: f.fixture.status.short === "FT" ? "FINISHED" : (["1H", "2H", "HT", "ET", "P"].includes(f.fixture.status.short) ? "IN_PLAY" : "SCHEDULED"),
-                    utcDate: f.fixture.date,
-                    homeTeam: { name: f.teams.home.name },
-                    awayTeam: { name: f.teams.away.name },
-                    stage: "REGULAR_SEASON",
-                    matchday: f.league.round ? parseInt(f.league.round.replace(/[^0-9]/g, '')) || 1 : 1,
-                    score: {
-                        fullTime: { home: f.goals.home, away: f.goals.away },
-                        winner: f.teams.home.winner ? "HOME_TEAM" : (f.teams.away.winner ? "AWAY_TEAM" : null)
-                    }
-                }));
+
+                    return {
+                        id: String(m.id),
+                        status: statusStr,
+                        utcDate: m.status?.utcTime || m.time || new Date().toISOString(),
+                        homeTeam: { name: m.home?.name || m.homeName || "Neznámý" },
+                        awayTeam: { name: m.away?.name || m.awayName || "Neznámý" },
+                        stage: "REGULAR_SEASON",
+                        matchday: m.round || m.roundName ? parseInt(String(m.round || m.roundName).replace(/[^0-9]/g, '')) || 1 : 1,
+                        score: {
+                            fullTime: { home: homeScore, away: awayScore },
+                            winner: (homeScore > awayScore) ? "HOME_TEAM" : ((awayScore > homeScore) ? "AWAY_TEAM" : null)
+                        }
+                    };
+                });
             } else if (provider === "API_SPORTS_HOCKEY") {
                 if (!apiSportsKey) {
                     console.log(`⚠️ Chybí API_FOOTBALL_KEY pro Hokej API [${leagueName}]. Přesakuji...`);
                     continue;
                 }
                 const seasonYear = new Date().getFullYear();
-                const response = await fetch(`https://v1.hockey.api-sports.io/games?league=${leagueApiId}&season=${seasonYear}`, {
+                let response = await fetch(`https://v1.hockey.api-sports.io/games?league=${leagueApiId}&season=${seasonYear}`, {
                     headers: { "x-apisports-key": apiSportsKey }
                 });
                 if (!response.ok) throw new Error(`API-Hockey error (${leagueName}): ${response.status}`);
-                const apiData = await response.json();
+                let apiData = await response.json();
+
+                console.log(`🔎 DIAGNOSTIKA HOKEJ API [${leagueName} - Sezóna ${seasonYear}]: Nalezeno zápasů: ${apiData.results || 0}`, apiData.errors && Object.keys(apiData.errors).length > 0 ? `Chyby API: ${JSON.stringify(apiData.errors)}` : "");
+
+                // 🔄 FALLBACK PRO HOKEJ: Pokud rok 2026 nevrátí nic, zkusíme ročník 2025
+                if ((!apiData.response || apiData.response.length === 0) && (!apiData.errors || Object.keys(apiData.errors).length === 0)) {
+                    const fallbackYear = seasonYear - 1;
+                    console.log(`⚠️ Hokej API pro rok ${seasonYear} vrátilo 0 zápasů. Zkouším záložní sezónu ${fallbackYear}...`);
+                    const responseFallback = await fetch(`https://v1.hockey.api-sports.io/games?league=${leagueApiId}&season=${fallbackYear}`, {
+                        headers: { "x-apisports-key": apiSportsKey }
+                    });
+                    if (responseFallback.ok) {
+                        const fallbackData = await responseFallback.json();
+                        console.log(`🔎 DIAGNOSTIKA HOKEJ ZÁLOŽNÍ [${leagueName} - Sezóna ${fallbackYear}]: Nalezeno zápasů: ${fallbackData.results || 0}`);
+                        if (fallbackData.response && fallbackData.response.length > 0) {
+                            apiData = fallbackData;
+                        }
+                    }
+                }
                 
                 matches = (apiData.response || []).map(g => ({
                     id: String(g.id),
