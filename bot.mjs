@@ -673,89 +673,73 @@ async function providniApiHeartbeat() {
             let matches = [];
 
             if (provider === "CZECH_AUTOMATED") {
-                // 🚀 AUTOMATICKÝ ČESKÝ FOTBALOVÝ ENGINE (Přímo z českých otevřených dat)
-                const response = await fetch("https://sdeleni.idnes.cz/fotbal/databanka/rozpis.aspx?id=100", {
-                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-                });
-                
+                // ⚽ AUTOMATICKÝ PARSER ČESKÉ LIGY (Bez jakýchkoliv vymyšlených záložních dat)
                 let rawList = [];
-                if (response.ok) {
-                    const textData = await response.text();
-                    // Zpracování českého ligového feedu
-                    const matchBlocks = textData.split("<tr").slice(1);
-                    for (const block of matchBlocks) {
-                        const mIdMatch = block.match(/id="match_(\d+)"/);
-                        const teamsMatch = block.match(/class="team-name">([^<]+)<\/a>.*?class="team-name">([^<]+)<\/a>/s);
-                        const scoreMatch = block.match(/class="score">(\d+):(\d+)<\/td>/);
-                        const roundMatch = block.match(/(\d+)\.\s*kolo/i);
-                        const dateMatch = block.match(/(\d{1,2})\.(\d{1,2})\.\s*(\d{4})\s*(\d{1,2}):(\d{2})/);
 
-                        if (mIdMatch && teamsMatch) {
-                            const id = mIdMatch[1];
-                            const domaci = teamsMatch[1].trim();
-                            const hoste = teamsMatch[2].trim();
-                            const kolo = roundMatch ? parseInt(roundMatch[1]) : 1;
-                            
-                            let isoDate = new Date().toISOString();
-                            if (dateMatch) {
-                                const [_, d, m, y, hh, mm] = dateMatch;
-                                isoDate = new Date(Date.UTC(y, m - 1, d, hh - 2, mm)).toISOString();
-                            }
+                try {
+                    const response = await fetch("https://sdeleni.idnes.cz/fotbal/databanka/rozpis.aspx?id=100", {
+                        headers: { 
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                        }
+                    });
 
-                            let statusStr = "SCHEDULED";
-                            let homeScore = undefined;
-                            let awayScore = undefined;
+                    if (response.ok) {
+                        const htmlText = await response.text();
+                        const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+                        let rowMatch;
 
-                            if (scoreMatch) {
-                                statusStr = "FINISHED";
-                                homeScore = parseInt(scoreMatch[1]);
-                                awayScore = parseInt(scoreMatch[2]);
-                            }
+                        while ((rowMatch = rowRegex.exec(htmlText)) !== null) {
+                            const row = rowMatch[1];
+                            const teams = [...row.matchAll(/class="[^"]*team-name[^"]*"[^>]*>([^<]+)</gi)].map(m => m[1].trim());
+                            const scoreMatch = row.match(/(\d+)\s*:\s*(\d+)/);
+                            const roundMatch = row.match(/(\d+)\.\s*kolo/i);
+                            const dateMatch = row.match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})?\s*(\d{1,2})?:?(\d{2})?/);
 
-                            rawList.push({
-                                id: id,
-                                status: statusStr,
-                                utcDate: isoDate,
-                                homeTeam: { name: slovnikTymu[domaci] || domaci },
-                                awayTeam: { name: slovnikTymu[hoste] || hoste },
-                                stage: "REGULAR_SEASON",
-                                matchday: kolo,
-                                score: {
-                                    fullTime: { home: homeScore, away: awayScore },
-                                    winner: (homeScore > awayScore) ? "HOME_TEAM" : ((awayScore > homeScore) ? "AWAY_TEAM" : null)
+                            if (teams.length >= 2) {
+                                const homeName = slovnikTymu[teams[0]] || teams[0];
+                                const awayName = slovnikTymu[teams[1]] || teams[1];
+                                const koloNum = roundMatch ? parseInt(roundMatch[1]) : 1;
+                                const isFinished = !!scoreMatch;
+
+                                let isoDate = new Date().toISOString();
+                                if (dateMatch) {
+                                    const d = parseInt(dateMatch[1]);
+                                    const m = parseInt(dateMatch[2]);
+                                    const y = dateMatch[3] ? parseInt(dateMatch[3]) : new Date().getFullYear();
+                                    const hh = dateMatch[4] ? parseInt(dateMatch[4]) : 15;
+                                    const mm = dateMatch[5] ? parseInt(dateMatch[5]) : 0;
+                                    isoDate = new Date(Date.UTC(y, m - 1, d, hh - 2, mm)).toISOString();
                                 }
-                            });
+
+                                const cleanHome = homeName.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+                                const cleanAway = awayName.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+                                const matchId = `cl_k${koloNum}_${cleanHome}_${cleanAway}`;
+
+                                const homeScore = isFinished ? parseInt(scoreMatch[1]) : undefined;
+                                const awayScore = isFinished ? parseInt(scoreMatch[2]) : undefined;
+
+                                rawList.push({
+                                    id: matchId,
+                                    status: isFinished ? "FINISHED" : "SCHEDULED",
+                                    utcDate: isoDate,
+                                    homeTeam: { name: homeName },
+                                    awayTeam: { name: awayName },
+                                    stage: "GROUP_STAGE", // 🎯 OPRAVA: Vždy základní část (žádné PLAY-OFF)
+                                    matchday: koloNum,
+                                    score: {
+                                        fullTime: { home: homeScore, away: awayScore },
+                                        winner: isFinished ? (homeScore > awayScore ? "HOME_TEAM" : (awayScore > homeScore ? "AWAY_TEAM" : null)) : null
+                                    }
+                                });
+                            }
                         }
                     }
+                } catch (err) {
+                    console.error(`❌ Chyba autostahování české ligy:`, err);
                 }
 
-                // Bezpečnostní záložka: Pokud je přímý feed dočasně prázdný, vygenerujeme 1. kolo automaticky
-                if (rawList.length === 0) {
-                    console.log(`⚠️ Generuji automatický startovací ročník Chance Ligy...`);
-                    const startData = [
-                        { id: "cl_1", d: "Sparta Praha", h: "Sigma Olomouc", k: 1 },
-                        { id: "cl_2", d: "Slavia Praha", h: "Hradec Králové", k: 1 },
-                        { id: "cl_3", d: "Viktoria Plzeň", h: "Baník Ostrava", k: 1 },
-                        { id: "cl_4", d: "Mladá Boleslav", h: "Slovan Liberec", k: 1 },
-                        { id: "cl_5", d: "Slovácko", h: "Jablonec", k: 1 },
-                        { id: "cl_6", d: "Bohemians 1905", h: "Teplice", k: 1 },
-                        { id: "cl_7", d: "Karviná", h: "Pardubice", k: 1 },
-                        { id: "cl_8", d: "Dukla Praha", h: "Dynamo Č. Budějovice", k: 1 }
-                    ];
-
-                    rawList = startData.map(item => ({
-                        id: item.id,
-                        status: "SCHEDULED",
-                        utcDate: new Date(Date.now() + 86400000).toISOString(),
-                        homeTeam: { name: item.d },
-                        awayTeam: { name: item.h },
-                        stage: "REGULAR_SEASON",
-                        matchday: item.k,
-                        score: { fullTime: { home: undefined, away: undefined }, winner: null }
-                    }));
-                }
-
-                console.log(`🔎 AUTOMATICKÝ ČESKÝ ENGINE [${leagueName}]: Načteno ${rawList.length} zápasů.`);
+                console.log(`🔎 AUTOMATICKÝ ČESKÝ ENGINE [${leagueName}]: Načteno ${rawList.length} reálných zápasů.`);
                 matches = rawList;
             } else if (provider === "FOOTBALL_DATA") {
                 if (!footballDataKey) {
