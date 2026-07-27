@@ -217,7 +217,7 @@ function inicializujLiveFirestoreStreams() {
     SEZNAM_LIG.forEach(leagueName => {
         if (!RAM_CENTRAL_MATCHES[leagueName]) RAM_CENTRAL_MATCHES[leagueName] = {};
 
-        db.collection("ligy").doc(leagueName).collection("zapasy").onSnapshot(snapshot => {
+        db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").onSnapshot(snapshot => {
             snapshot.docChanges().forEach(change => {
                 const matchId = change.doc.id;
                 const data = change.doc.data() || {};
@@ -875,7 +875,7 @@ async function providniApiHeartbeat() {
                     if (golyHoste !== undefined) syncPayload.vysledek_hoste = golyHoste;
                     if (postupVal) syncPayload.postup = postupVal;
 
-                    db.collection("ligy").doc(leagueName).collection("zapasy").doc(apiId).set(syncPayload, { merge: true })
+                    db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").doc(apiId).set(syncPayload, { merge: true })
                         .catch(e => console.error(`❌ Chyba sync Firebase [${leagueName}]:`, e));
                 }
 
