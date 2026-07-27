@@ -858,14 +858,18 @@ async function providniApiHeartbeat() {
                 const jeUkoncenBezVysledkuVDB = status === "FINISHED" && golyDomaci !== undefined && golyHoste !== undefined && (!stary || stary.vysledek_domaci === undefined);
                 const potrebujeOpravitKoloVDB = stary && (stary.kolo !== spravneKoloTurnaje);
 
-                if (detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB) {
+                // 🚀 PROFI JISTIČ: Pokud zápas v DB ještě neexistuje (!stary), ihned ho vytvoříme
+                const jeNovyZapasVDB = !stary;
+
+                if (jeNovyZapasVDB || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB) {
                     console.log(`💾 AUTO-SYNC FIREBASE [${leagueName}]: ${finalDomaci} - ${finalHoste} (${spravneKoloTurnaje})`);
                     const syncPayload = {
                         domaci: finalDomaci,
                         hoste: finalHoste,
                         apiStatus: status,
                         kolo: spravneKoloTurnaje,
-                        isPlayoff: isPlayoff
+                        isPlayoff: isPlayoff,
+                        datum: match.utcDate
                     };
                     if (golyDomaci !== undefined) syncPayload.vysledek_domaci = golyDomaci;
                     if (golyHoste !== undefined) syncPayload.vysledek_hoste = golyHoste;
