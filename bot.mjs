@@ -124,6 +124,8 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
 // --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD) ---
 async function uploadToR2(leagueName, filename, jsonData) {
     try {
+        // Pauza 200ms jako ochrana proti Cloudflare R2 rate-limitům
+        await new Promise(resolve => setTimeout(resolve, 200));
         const bodyText = JSON.stringify(jsonData, null, 2);
         const ligaKlic = String(leagueName).replace(/ /g, "_");
         const dynamicPath = `sezony/${SEZONA_ID}/${ligaKlic}/${filename}`;
@@ -679,8 +681,8 @@ async function providniApiHeartbeat() {
 
                 await new Promise(resolve => setTimeout(resolve, 1000));
 
-                const aktualniRok = new Date().getFullYear();
-                const sezoneYear = `${aktualniRok - 1}-${aktualniRok}`;
+                // Převede SEZONA_ID (např. "2026_2027") na formát TheSportsDB ("2026-2027")
+                const sezoneYear = String(SEZONA_ID).replace("_", "-");
 
                 const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`);
 
