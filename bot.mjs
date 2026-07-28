@@ -14,12 +14,12 @@ const PORT = process.env.PORT || 8080;
 
 // 🗺️ ČÍSELNÍK SPORTOVNÍCH API PROVIDERŮ A ID SOUTĚŽÍ
 const LIGY_API_MAPA = {
-    "Chance Liga": { id: "345", provider: "RAPID_API" },
-    "MS ve fotbale": { id: "1", provider: "RAPID_API" },
-    "Premier League": { id: "39", provider: "RAPID_API" },
-    "Liga národů": { id: "5", provider: "RAPID_API" },
-    "Tipsport Extraliga": { id: "359", provider: "MANUAL" },
-    "MS v hokeji": { id: "757", provider: "MANUAL" }
+    "Chance Liga": { id: "4631", provider: "THESPORTSDB" },
+    "Premier League": { id: "4328", provider: "THESPORTSDB" },
+    "MS ve fotbale": { id: "4429", provider: "THESPORTSDB" },
+    "Liga národů": { id: "4708", provider: "THESPORTSDB" },
+    "Tipsport Extraliga": { id: "4923", provider: "THESPORTSDB" },
+    "MS v hokeji": { id: "4859", provider: "THESPORTSDB" }
 };
 
 // Seznam lig, které má bot v tomto běhu živě obsluhovat
@@ -626,8 +626,7 @@ async function providniApiHeartbeat() {
         return;
     }
 
-    const apiSportsKey = process.env.API_FOOTBALL_KEY;
-    const footballDataKey = process.env.FOOTBALL_DATA_API_KEY;
+    const dbKey = process.env.THESPORTSDB_KEY;
 
     let celkovyDosloKStavoveZmene = false;
     let celkovyObsahujeAktivniZapas = false;
@@ -672,64 +671,58 @@ async function providniApiHeartbeat() {
         try {
             let matches = [];
 
-            if (provider === "RAPID_API") {
-                const rapidApiKey = process.env.RAPIDAPI_KEY;
-                if (!rapidApiKey) {
-                    console.log(`⚠️ Chybí RAPIDAPI_KEY pro [${leagueName}]. Přesakuji...`);
+            if (provider === "THESPORTSDB") {
+                if (!dbKey) {
+                    console.log(`⚠️ Chybí THESPORTSDB_KEY pro [${leagueName}]. Přeskakuji...`);
                     continue;
                 }
 
-                // ⚽ Volání přes Smart API (Free Football API Data)
-                const response = await fetch(`https://free-api-live-football-data.p.rapidapi.com/football-get-all-matches-by-league?league_id=${leagueApiId}`, {
-                    headers: {
-                        "x-rapidapi-key": rapidApiKey,
-                        "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com"
-                    }
-                });
+                await new Promise(resolve => setTimeout(resolve, 1000));
 
-                if (!response.ok) throw new Error(`RapidAPI error (${leagueName}): ${response.status}`);
+                const aktualniRok = new Date().getFullYear();
+                const sezoneYear = `${aktualniRok - 1}-${aktualniRok}`;
+
+                const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`);
+
+                if (!response.ok) throw new Error(`TheSportsDB error (${leagueName}): ${response.status}`);
                 const apiData = await response.json();
-                const rawItems = apiData.response || apiData.data || apiData.status || [];
+                const rawItems = apiData.events || [];
 
-                console.log(`🔎 RAPID-API ENGINE [${leagueName}]: Načteno ${rawItems.length} reálných zápasů.`);
+                console.log(`🔎 THESPORTSDB ENGINE [${leagueName}]: Načteno ${rawItems.length} reálných zápasů.`);
 
-                matches = (Array.isArray(rawItems) ? rawItems : []).map(item => {
-                    const fixture = item.fixture || item || {};
-                    const teams = item.teams || {};
-                    const goals = item.goals || {};
-
-                    const isFinished = fixture.status?.short === "FT" || fixture.status === "FINISHED";
-                    const isLive = fixture.status?.short === "1H" || fixture.status?.short === "2H" || fixture.status === "IN_PLAY";
+                matches = rawItems.map(item => {
+                    const statusRaw = item.strStatus || "";
+                    const isFinished = statusRaw === "Match Finished" || statusRaw === "FT" || (item.intHomeScore !== null && item.intAwayScore !== null && statusRaw !== "In Progress");
+                    const isLive = statusRaw === "In Progress" || statusRaw === "1H" || statusRaw === "2H" || statusRaw === "HT";
                     const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
 
-                    const rawHome = teams.home?.name || item.home_name || "Neznámý";
-                    const rawAway = teams.away?.name || item.away_name || "Neznámý";
+                    const homeScore = (item.intHomeScore !== null && item.intHomeScore !== undefined) ? parseInt(item.intHomeScore) : undefined;
+                    const awayScore = (item.intAwayScore !== null && item.intAwayScore !== undefined) ? parseInt(item.intAwayScore) : undefined;
+
+                    const rawHome = item.strHomeTeam || "Neznámý";
+                    const rawAway = item.strAwayTeam || "Neznámý";
+                    const roundNum = parseInt(item.intRound) || 1;
+
+                    let matchIsoDate = new Date().toISOString();
+                    if (item.dateEvent) {
+                        const timeStr = item.strTime ? item.strTime : "00:00:00";
+                        matchIsoDate = new Date(`${item.dateEvent}T${timeStr}Z`).toISOString();
+                    }
 
                     return {
-                        id: String(fixture.id || item.match_id || Math.random()),
+                        id: String(item.idEvent),
                         status: statusStr,
-                        utcDate: fixture.date || item.match_time || new Date().toISOString(),
+                        utcDate: matchIsoDate,
                         homeTeam: { name: slovnikTymu[rawHome] || rawHome },
                         awayTeam: { name: slovnikTymu[rawAway] || rawAway },
                         stage: "GROUP_STAGE",
-                        matchday: parseInt(item.round) || 1,
+                        matchday: roundNum,
                         score: {
-                            fullTime: { home: goals.home ?? item.home_score, away: goals.away ?? item.away_score },
-                            winner: goals.home > goals.away ? "HOME_TEAM" : (goals.away > goals.home ? "AWAY_TEAM" : null)
+                            fullTime: { home: homeScore, away: awayScore },
+                            winner: (homeScore > awayScore) ? "HOME_TEAM" : ((awayScore > homeScore) ? "AWAY_TEAM" : null)
                         }
                     };
                 });
-            } else if (provider === "FOOTBALL_DATA") {
-                if (!footballDataKey) {
-                    console.log(`⚠️ Chybí FOOTBALL_DATA_API_KEY pro [${leagueName}]. Přesakuji...`);
-                    continue;
-                }
-                const response = await fetch(`https://api.football-data.org/v4/competitions/${leagueApiId}/matches`, {
-                    headers: { "X-Auth-Token": footballDataKey }
-                });
-                if (!response.ok) throw new Error(`Football-Data error (${leagueName}): ${response.status}`);
-                const apiData = await response.json();
-                matches = apiData.matches || [];
             }
 
             const nyniMilisekundy = Date.now();
