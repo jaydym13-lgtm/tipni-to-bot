@@ -76,7 +76,8 @@ const slovnikTymu = {
     "Algeria": "Alžírsko", "Argentina": "Argentina", "Austria": "Rakousko", "Jordan": "Jordánsko",
     "Portugal": "Portugalsko", "Uzbekistan": "Uzbekistán", "Colombia": "Kolumbie",
     "DR Congo": "Kongo", "Congo DR": "Kongo", "Croatia": "Chorvatsko", "England": "Anglie",
-    "Ghana": "Ghana"
+    "Ghana": "Ghana", "Slavia Prague": "Slavia Praha", "Sparta Prague": "Sparta Praha",
+    "Bohemians 1905": "Bohemians Praha 1905", "Dukla Prague": "Dukla Praha"
 };
 
 // --- 🧮 POSVÁTNÁ MATEMATIKA BODŮ ---
@@ -701,8 +702,8 @@ async function providniApiHeartbeat() {
                     const homeScore = (item.intHomeScore !== null && item.intHomeScore !== undefined) ? parseInt(item.intHomeScore) : undefined;
                     const awayScore = (item.intAwayScore !== null && item.intAwayScore !== undefined) ? parseInt(item.intAwayScore) : undefined;
 
-                    const rawHome = item.strHomeTeam || "Neznámý";
-                    const rawAway = item.strAwayTeam || "Neznámý";
+                    const rawHomeClean = (item.strHomeTeam || "Neznámý").replace(/ Prague/g, " Praha");
+                    const rawAwayClean = (item.strAwayTeam || "Neznámý").replace(/ Prague/g, " Praha");
                     const roundNum = parseInt(item.intRound) || 1;
 
                     let matchIsoDate = new Date().toISOString();
@@ -715,9 +716,9 @@ async function providniApiHeartbeat() {
                         id: String(item.idEvent),
                         status: statusStr,
                         utcDate: matchIsoDate,
-                        homeTeam: { name: slovnikTymu[rawHome] || rawHome },
-                        awayTeam: { name: slovnikTymu[rawAway] || rawAway },
-                        stage: "GROUP_STAGE",
+                        homeTeam: { name: slovnikTymu[rawHomeClean] || rawHomeClean },
+                        awayTeam: { name: slovnikTymu[rawAwayClean] || rawAwayClean },
+                        stage: "REGULAR_SEASON",
                         matchday: roundNum,
                         score: {
                             fullTime: { home: homeScore, away: awayScore },
@@ -840,9 +841,8 @@ async function providniApiHeartbeat() {
                     else if (stage === "FINAL") spravneKoloTurnaje = "Finále";
                     else spravneKoloTurnaje = "Play-off";
                 } else if (match.matchday) {
-                    spravneKoloTurnaje = `Kolo ${match.matchday}`;
+                    spravneKoloTurnaje = `${match.matchday}. kolo`;
                 }
-
                 const finalDomaci = (!stary || stary.domaci === "Neznámý") ? domaci : stary.domaci;
                 const finalHoste = (!stary || stary.hoste === "Neznámý") ? hoste : stary.hoste;
 
