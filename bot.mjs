@@ -76,8 +76,24 @@ const slovnikTymu = {
     "Algeria": "Alžírsko", "Argentina": "Argentina", "Austria": "Rakousko", "Jordan": "Jordánsko",
     "Portugal": "Portugalsko", "Uzbekistan": "Uzbekistán", "Colombia": "Kolumbie",
     "DR Congo": "Kongo", "Congo DR": "Kongo", "Croatia": "Chorvatsko", "England": "Anglie",
-    "Ghana": "Ghana", "Slavia Prague": "Slavia Praha", "Sparta Prague": "Sparta Praha",
-    "Bohemians 1905": "Bohemians Praha 1905", "Dukla Prague": "Dukla Praha"
+    "Ghana": "Ghana",
+    // ⚽ CHANCE LIGA - KRÁTKÉ NÁZVY
+    "Sparta Prague": "Sparta", "AC Sparta Praha": "Sparta", "Sparta Praha": "Sparta",
+    "Slavia Prague": "Slavia", "SK Slavia Praha": "Slavia", "Slavia Praha": "Slavia",
+    "Viktoria Plzen": "Plzeň", "FC Viktoria Plzeň": "Plzeň", "Viktoria Plzeň": "Plzeň",
+    "Banik Ostrava": "Ostrava", "FC Baník Ostrava": "Ostrava", "Baník Ostrava": "Ostrava",
+    "Sigma Olomouc": "Olomouc", "SK Sigma Olomouc": "Olomouc",
+    "Slovan Liberec": "Liberec", "FC Slovan Liberec": "Liberec",
+    "Mlada Boleslav": "Mladá Boleslav", "FK Mladá Boleslav": "Mladá Boleslav",
+    "Hradec Kralove": "Hradec Králové", "FC Hradec Králové": "Hradec Králové",
+    "Slovacko": "Slovácko", "1.FC Slovácko": "Slovácko", "1. FC Slovácko": "Slovácko",
+    "Teplice": "Teplice", "FK Teplice": "Teplice",
+    "Pardubice": "Pardubice", "FK Pardubice": "Pardubice",
+    "Jablonec": "Jablonec", "FK Jablonec": "Jablonec",
+    "Zlin": "Zlín", "FC Zlín": "Zlín", "Fastav Zlín": "Zlín",
+    "Bohemians 1905": "Bohemians 1905", "Bohemians Praha 1905": "Bohemians 1905",
+    "Zbrojovka Brno": "Zbrojovka Brno", "FC Zbrojovka Brno": "Zbrojovka Brno",
+    "Artis Brno": "Artis Brno", "SK Líšeň": "Artis Brno"
 };
 
 // --- 🧮 POSVÁTNÁ MATEMATIKA BODŮ ---
@@ -739,11 +755,6 @@ async function providniApiHeartbeat() {
 
                 const uzSeHrajePodleAPI = status === "IN_PLAY" || status === "PAUSED" || status === "LIVE";
                 const matchStarted = uzSeHrajePodleAPI || (nyniMilisekundy >= startZapasuMilisekundy);
-
-                const limitBudoucnostiMili = 28 * 24 * 60 * 60 * 1000;
-                if (status === "SCHEDULED" && (startZapasuMilisekundy - nyniMilisekundy) > limitBudoucnostiMili) {
-                    continue;
-                }
 
                 if (status !== "FINISHED" && rozdilMinut <= 0) {
                     celkovyObsahujeAktivniZapas = true;
