@@ -74,3 +74,72 @@ export const PRAVIDLA_LIG = {
 if (typeof window !== 'undefined') {
     window.PRAVIDLA_LIG = PRAVIDLA_LIG;
 }
+
+// =========================================================================
+// 🧮 CENTRÁLNÍ KALKULÁTOR BODŮ PRO ZÁPASY
+// =========================================================================
+window.vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, leagueName, tipPostup, resPostup, isPlayoff, isTopMatch = false) => {
+    if (resDomaci === undefined || resHoste === undefined || resDomaci === null || resHoste === null) return 0;
+    
+    const pravidla = PRAVIDLA_LIG[leagueName] || PRAVIDLA_LIG["DEFAULT"];
+
+    // ⚠️ NENATIPOVANÝ ZÁPAS
+    if (tipDomaci === undefined || tipHoste === undefined || tipDomaci === null || tipHoste === null || tipDomaci === '' || tipHoste === '') {
+        return pravidla.penaltyNenatipovano || 0;
+    }
+
+    const tD = parseInt(tipDomaci);
+    const tH = parseInt(tipHoste);
+    const rD = parseInt(resDomaci);
+    const rH = parseInt(resHoste);
+
+    let body = 0;
+
+    // ⚽ 1. CHANCE LIGA
+    if (leagueName === "Chance Liga") {
+        const presny = (tD === rD && tH === rH);
+        const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
+        
+        if (presny) body = pravidla.presnyVysledek;
+        else if (spravnaTendence) body = pravidla.zakladniTendence;
+        else body = 0;
+    }
+    // ⚽ 2. MS VE FOTBALE
+    else if (leagueName === "MS ve fotbale") {
+        const presny = (tD === rD && tH === rH);
+        const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
+        const presneGolyJednoho = (tD === rD || tH === rH);
+        const presnyRozdil = ((tD - tH) === (rD - rH));
+
+        if (presny) {
+            body = pravidla.presnyVysledek;
+        } else if (spravnaTendence) {
+            if (presneGolyJednoho || presnyRozdil) body = pravidla.chytraTendence;
+            else body = pravidla.zakladniTendence;
+        } else if (presneGolyJednoho) {
+            body = pravidla.golUtechy;
+        } else {
+            body = 0;
+        }
+
+        if (isPlayoff && tD === tH && rD === rH && tipPostup && resPostup && tipPostup === resPostup) {
+            body += pravidla.playoffBonus;
+        }
+    }
+    // 🏒 3. HOKEJOVÉ LIGY & DEFAULT
+    else {
+        const presny = (tD === rD && tH === rH);
+        const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
+
+        if (presny) body = pravidla.presnyVysledek;
+        else if (spravnaTendence) body = pravidla.zakladniTendence;
+        else body = 0;
+    }
+
+    // 🔥 DVOJNÁSOBEK BODŮ PRO TOP ZÁPAS (2x)
+    if (isTopMatch && body > 0 && pravidla.hasTopMatch) {
+        body = body * pravidla.topMatchMultiplier;
+    }
+
+    return body;
+};
