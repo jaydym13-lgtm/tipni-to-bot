@@ -829,19 +829,16 @@ async function providniApiHeartbeat() {
                 }
 
                 const stage = match.stage || "";
-                const jeToCtyrteKolo = stage === "LAST_32" || stage === "LAST_16" || stary?.kolo === "LAST_32" || stary?.kolo === "LAST_16" || stary?.kolo === "4. kolo";
-                
                 let spravneKoloTurnaje = "Šampionát";
-                if (jeToCtyrteKolo) {
-                    spravneKoloTurnaje = "4. kolo";
-                } else if (isPlayoff) {
+
+                if (isPlayoff) {
                     if (stage === "QUARTER_FINALS") spravneKoloTurnaje = "Čtvrtfinále";
                     else if (stage === "SEMI_FINALS") spravneKoloTurnaje = "Semifinále";
                     else if (stage === "THIRD_PLACE") spravneKoloTurnaje = "Zápas o 3. místo";
                     else if (stage === "FINAL") spravneKoloTurnaje = "Finále";
                     else spravneKoloTurnaje = "Play-off";
-                } else if (match.matchday) {
-                    spravneKoloTurnaje = `${match.matchday}. kolo`;
+                } else if (match.matchday && parseInt(match.matchday) > 0) {
+                    spravneKoloTurnaje = `${parseInt(match.matchday)}. kolo`;
                 }
                 const finalDomaci = (!stary || stary.domaci === "Neznámý") ? domaci : stary.domaci;
                 const finalHoste = (!stary || stary.hoste === "Neznámý") ? hoste : stary.hoste;
