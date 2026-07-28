@@ -758,7 +758,7 @@ async function providniApiHeartbeat() {
                 const rawHoste = match.awayTeam?.name || "Neznámý";
                 const domaci = slovnikTymu[rawDomaci] || rawDomaci;
                 const hoste = slovnikTymu[rawHoste] || rawHoste;
-                const isPlayoff = match.stage !== "GROUP_STAGE";
+                const isPlayoff = match.stage !== "GROUP_STAGE" && match.stage !== "REGULAR_SEASON";
 
                 let golyDomaci = undefined; let golyHoste = undefined; let postupVal = "";
                 const jeZapasAktivni = status === "FINISHED" || status === "IN_PLAY" || status === "PAUSED";
