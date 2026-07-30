@@ -94,15 +94,43 @@ const slovnikTymu = {
     "Bohemians 1905": "Bohemians 1905", "Bohemians Praha 1905": "Bohemians 1905",
     "Zbrojovka Brno": "Zbrojovka Brno", "FC Zbrojovka Brno": "Zbrojovka Brno",
     "Artis Brno": "Artis Brno", "SK Líšeň": "Artis Brno",
-    // PREMIER LEAGUE - KRÁTKÉ ČESKÉ NÁZVY
-    "Manchester City": "Man. City", "Manchester United": "Man. United", "Liverpool": "Liverpool",
-    "Arsenal": "Arsenal", "Chelsea": "Chelsea", "Tottenham": "Tottenham", "Tottenham Hotspur": "Tottenham",
-    "Aston Villa": "Aston Villa", "Newcastle": "Newcastle", "Newcastle United": "Newcastle",
-    "West Ham": "West Ham", "West Ham United": "West Ham", "Brighton": "Brighton", "Brighton & Hove Albion": "Brighton",
-    "Everton": "Everton", "Fulham": "Fulham", "Brentford": "Brentford", "Bournemouth": "Bournemouth",
-    "Wolverhampton Wanderers": "Wolves", "Wolves": "Wolves", "Crystal Palace": "Crystal Palace",
-    "Nottingham Forest": "Nottingham", "Leicester": "Leicester", "Leicester City": "Leicester",
-    "Ipswich": "Ipswich", "Ipswich Town": "Ipswich", "Southampton": "Southampton"
+    // 🏴󠁧󠁢󠁥󠁮󠁧󠁿 PREMIER LEAGUE 2026/2027 - KRÁTKÉ ČESKÉ NÁZVY
+    "Arsenal FC": "Arsenal", "Arsenal": "Arsenal",
+    "Aston Villa FC": "Aston Villa", "Aston Villa": "Aston Villa",
+    "AFC Bournemouth": "Bournemouth", "Bournemouth": "Bournemouth",
+    "Brentford FC": "Brentford", "Brentford": "Brentford",
+    "Brighton & Hove Albion FC": "Brighton", "Brighton & Hove Albion": "Brighton", "Brighton": "Brighton",
+    "Chelsea FC": "Chelsea", "Chelsea": "Chelsea",
+    "Coventry City FC": "Coventry", "Coventry City": "Coventry", "Coventry": "Coventry",
+    "Crystal Palace FC": "Crystal Palace", "Crystal Palace": "Crystal Palace",
+    "Everton FC": "Everton", "Everton": "Everton",
+    "Fulham FC": "Fulham", "Fulham": "Fulham",
+    "Hull City AFC": "Hull", "Hull City": "Hull", "Hull": "Hull",
+    "Ipswich Town FC": "Ipswich", "Ipswich Town": "Ipswich", "Ipswich": "Ipswich",
+    "Leeds United FC": "Leeds", "Leeds United": "Leeds", "Leeds": "Leeds",
+    "Liverpool FC": "Liverpool", "Liverpool": "Liverpool",
+    "Manchester City FC": "Man. City", "Manchester City": "Man. City",
+    "Manchester United FC": "Man. United", "Manchester United": "Man. United",
+    "Newcastle United FC": "Newcastle", "Newcastle United": "Newcastle", "Newcastle": "Newcastle",
+    "Nottingham Forest FC": "Nottingham", "Nottingham Forest": "Nottingham", "Nottingham": "Nottingham",
+    "Sunderland AFC": "Sunderland", "Sunderland": "Sunderland",
+    "Tottenham Hotspur FC": "Tottenham", "Tottenham Hotspur": "Tottenham", "Tottenham": "Tottenham",
+
+    // 🏒 TIPSPORT EXTRALIGA 2026/2027 - KRÁTKÉ ČESKÉ NÁZVY
+    "HC Sparta Praha": "Sparta", "Sparta Praha": "Sparta",
+    "HC Dynamo Pardubice": "Pardubice", "Dynamo Pardubice": "Pardubice",
+    "HC Oceláři Třinec": "Třinec", "Oceláři Třinec": "Třinec",
+    "HC VÍTKOVICE RIDERA": "Vítkovice", "HC Vitkovice Ridera": "Vítkovice", "HC Vítkovice": "Vítkovice",
+    "Bílí Tygři Liberec": "Liberec", "Bili Tygri Liberec": "Liberec",
+    "HC Kometa Brno": "Kometa", "Kometa Brno": "Kometa",
+    "Mountfield HK": "Hradec Králové", "Mountfield Hradec Kralove": "Hradec Králové",
+    "HC VERVA Litvínov": "Litvínov", "HC Verva Litvinov": "Litvínov",
+    "HC Olomouc": "Olomouc",
+    "BK Mladá Boleslav": "Mladá Boleslav", "BK Mlada Boleslav": "Mladá Boleslav",
+    "HC Škoda Plzeň": "Plzeň", "HC Skoda Plzen": "Plzeň",
+    "HC Energie Karlovy Vary": "Karlovy Vary",
+    "Rytíři Kladno": "Kladno", "Rytiri Kladno": "Kladno",
+    "Banes Motor České Budějovice": "Č. Budějovice", "HC Motor České Budějovice": "Č. Budějovice", "Motor České Budějovice": "Č. Budějovice"
 };
 
 // --- 🧮 POSVÁTNÁ MATEMATIKA BODŮ ---
