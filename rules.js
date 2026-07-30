@@ -104,7 +104,7 @@ if (typeof window !== 'undefined') {
 // =========================================================================
 // 🧮 CENTRÁLNÍ KALKULÁTOR BODŮ PRO ZÁPASY
 // =========================================================================
-window.vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, leagueName, tipPostup, resPostup, isPlayoff, isTopMatch = false) => {
+export const vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, leagueName, tipPostup, resPostup, isPlayoff, isTopMatch = false) => {
     if (resDomaci === undefined || resHoste === undefined || resDomaci === null || resHoste === null) return 0;
     
     const pravidla = PRAVIDLA_LIG[leagueName] || PRAVIDLA_LIG["DEFAULT"];
@@ -174,3 +174,7 @@ window.vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, leagueNa
 
     return body;
 };
+
+if (typeof window !== 'undefined') {
+    window.vypocitejBodyZapasu = vypocitejBodyZapasu;
+}
