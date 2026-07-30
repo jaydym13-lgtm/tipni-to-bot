@@ -94,7 +94,7 @@ const slovnikTymu = {
     "Bohemians 1905": "Bohemians 1905", "Bohemians Praha 1905": "Bohemians 1905",
     "Zbrojovka Brno": "Zbrojovka Brno", "FC Zbrojovka Brno": "Zbrojovka Brno",
     "Artis Brno": "Artis Brno", "SK Líšeň": "Artis Brno",
-    // 󠁧󠁢󠁥󠁮󠁧󠁿 PREMIER LEAGUE - KRÁTKÉ ČESKÉ NÁZVY
+    // PREMIER LEAGUE - KRÁTKÉ ČESKÉ NÁZVY
     "Manchester City": "Man. City", "Manchester United": "Man. United", "Liverpool": "Liverpool",
     "Arsenal": "Arsenal", "Chelsea": "Chelsea", "Tottenham": "Tottenham", "Tottenham Hotspur": "Tottenham",
     "Aston Villa": "Aston Villa", "Newcastle": "Newcastle", "Newcastle United": "Newcastle",
