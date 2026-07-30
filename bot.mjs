@@ -22,7 +22,7 @@ const LIGY_API_MAPA = {
     "MS v hokeji": { id: "4859", provider: "THESPORTSDB" }
 };
 
-// Seznam lig, které má bot v tomto běhu živě obsluhovat (Rozšířeno o Premier League a Ligu národů)
+// Seznam lig, které má bot v tomto běhu živě obsluhovat
 const SEZNAM_LIG = (process.env.ACTIVE_LEAGUES || "Chance Liga,Premier League,Liga národů,MS ve fotbale,Tipsport Extraliga,MS v hokeji")
     .split(",")
     .map(l => l.trim())
@@ -150,7 +150,6 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
 // --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD) ---
 async function uploadToR2(leagueName, filename, jsonData) {
     try {
-        // Pauza 200ms jako ochrana proti Cloudflare R2 rate-limitům
         await new Promise(resolve => setTimeout(resolve, 200));
         const bodyText = JSON.stringify(jsonData, null, 2);
         const ligaKlic = String(leagueName).replace(/ /g, "_");
@@ -170,7 +169,6 @@ async function uploadToR2(leagueName, filename, jsonData) {
 let apiHeartbeatStartedGlobal = false;
 const readySignalsGlobal = { users: false, tips: false, matches: false };
 
-// 🪐 EVENT-DRIVEN POŠŤÁK: Hlídá synchronní připravenost RAM paměti bez hnusných timeoutů!
 function emitReadySignalGlobal(streamName) {
     if (!readySignalsGlobal[streamName]) {
         readySignalsGlobal[streamName] = true;
@@ -290,13 +288,12 @@ async function rekonstruujAgregatyVsechny(forceWriteHistory = false) {
 // 🤖 AUTONOMNÍ FAIR-PLAY GENERÁTOR TOP ZÁPASŮ
 async function autoGenerujTopZapasyProLigu(leagueName) {
     const pravidla = PRAVIDLA_LIG[leagueName];
-    if (!pravidla || !pravidla.hasTopMatch) return; // Liga nepodporuje TOP zápas
+    if (!pravidla || !pravidla.hasTopMatch) return;
 
     const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
     const zapasyPole = Object.entries(centralMatches).map(([id, z]) => ({ ...z, id }));
     if (zapasyPole.length === 0) return;
 
-    // Seznam známých derby a šlágrů pro přidělení atraktivitního bonusu
     const DERBY_SLAGRY = [
         "Sparta-Slavia", "Slavia-Sparta", "Plzeň-Sparta", "Sparta-Plzeň", "Slavia-Plzeň", "Plzeň-Slavia",
         "Arsenal-Tottenham", "Tottenham-Arsenal", "Man. City-Liverpool", "Liverpool-Man. City",
@@ -304,7 +301,6 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
         "Liverpool-Everton", "Everton-Liverpool", "Arsenal-Man. City", "Man. City-Arsenal"
     ];
 
-    // 1. Spočítáme, kolikrát už každý tým v sezóně figuroval v TOP zápase
     const topUcastTymu = {};
     zapasyPole.forEach(z => {
         if (z.isTopMatch) {
@@ -313,7 +309,6 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
         }
     });
 
-    // 2. Seskupíme zápasy podle jednotlivých kol
     const kolaMap = {};
     zapasyPole.forEach(z => {
         const k = String(z.kolo || "Šampionát").trim();
@@ -321,28 +316,23 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
         kolaMap[k].push(z);
     });
 
-    // 3. Projdeme každé kolo a zkontrolujeme, zda má vybraný TOP zápas
     for (const [koloNazev, zapasyVKole] of Object.entries(kolaMap)) {
         const uzMaTop = zapasyVKole.some(z => z.isTopMatch);
-        if (uzMaTop) continue; // Admin nebo bot už pro toto kolo TOP zápas vybral
+        if (uzMaTop) continue;
 
-        // Vyfiltrujeme pouze budoucí/neodehrané zápasy v daném kole
         const neodehrane = zapasyVKole.filter(z => z.vysledek_domaci === undefined && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
         if (neodehrane.length === 0) continue;
 
-        // Spočítáme férovostní skóre pro každý kandidátský zápas
         let nejlepsiZapas = null;
         let nejvyssiSkore = -Infinity;
 
         neodehrane.forEach(match => {
             let skore = 100;
 
-            // FÉR-PLAY PENALIZACE: Čím vícekrát už týmy v TOP byly, tím nižší priority mají
             const ucastDomaci = topUcastTymu[match.domaci] || 0;
             const ucastHoste = topUcastTymu[match.hoste] || 0;
             skore -= (ucastDomaci + ucastHoste) * 25;
 
-            // DERBY / ŠLÁGR BONUS
             const dvojice = `${match.domaci}-${match.hoste}`;
             if (DERBY_SLAGRY.some(d => d.toLowerCase() === dvojice.toLowerCase())) {
                 skore += 40;
@@ -354,7 +344,6 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
             }
         });
 
-        // 4. Pokud bot našel vítězný zápas, označí ho a uloží do Firestore
         if (nejlepsiZapas) {
             console.log(`🔥 AUTO TOP MATCH [${leagueName} - ${koloNazev}]: Vybráno ${nejlepsiZapas.domaci} vs ${nejlepsiZapas.hoste} (Skóre: ${nejvyssiSkore})`);
             RAM_CENTRAL_MATCHES[leagueName][nejlepsiZapas.id].isTopMatch = true;
@@ -372,7 +361,6 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
 }
 
 async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false) {
-    // 🔥 AUTOMATICKÝ GENERÁTOR TOP ZÁPASŮ PŘED VYPOČTENÍM AGREGÁTŮ
     await autoGenerujTopZapasyProLigu(leagueName);
 
     const ligaKlic = String(leagueName).replace(/ /g, "_");
@@ -691,7 +679,6 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
 
     await uploadToR2(leagueName, "leaderboard.json", leaderboardJson);
 
-    // 🧠 AUTOMATICKÁ DETEKCE A OBSAH ROZPISU S PRÍZNAKEM hasMatches (Pro auto-skrývání lig bez zápasů)
     const pocetZapasu = Object.keys(centralMatches).length;
     const hasMatches = pocetZapasu > 0;
 
@@ -766,7 +753,6 @@ async function providniApiHeartbeat() {
             continue;
         }
 
-        // 🧠 SMART SCHEDULER (DIETA API LIMITŮ): Kontrola, zda má ligu smysl dotazovat
         const centralneZapasyLigy = Object.values(RAM_CENTRAL_MATCHES[leagueName] || {});
         const maAktivniZapasVRam = centralneZapasyLigy.some(z => z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED");
         const nyniMs = Date.now();
@@ -775,10 +761,9 @@ async function providniApiHeartbeat() {
             .reduce((min, z) => Math.min(min, Date.parse(z.datum)), Infinity);
 
         const minutyDoDalsihoZapasu = (najblizsiZapasMs - nyniMs) / (1000 * 60);
-        const maBudouciZapasBlizko = minutyDoDalsihoZapasu <= 120; // 2 hodiny do výkopu/buly nebo méně
+        const maBudouciZapasBlizko = minutyDoDalsihoZapasu <= 120;
         const maPrazdnouRam = centralneZapasyLigy.length === 0;
 
-        // Pokud máme rozpis v RAM, nehrají se žádné živé zápasy a další zápas je daleko -> PŘESAKUJEME API
         if (!maPrazdnouRam && !maAktivniZapasVRam && !maBudouciZapasBlizko) {
             const hodinyDoZapasu = Math.round(minutyDoDalsihoZapasu / 60);
             const textCasu = isFinite(hodinyDoZapasu) ? `${hodinyDoZapasu} hod` : "nedohlednu";
@@ -802,7 +787,6 @@ async function providniApiHeartbeat() {
 
                 await new Promise(resolve => setTimeout(resolve, 1000));
 
-                // Převede SEZONA_ID (např. "2026_2027") na formát TheSportsDB ("2026-2027")
                 const sezoneYear = String(SEZONA_ID).replace("_", "-");
 
                 const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`);
@@ -962,7 +946,6 @@ async function providniApiHeartbeat() {
                 const jeUkoncenBezVysledkuVDB = status === "FINISHED" && golyDomaci !== undefined && golyHoste !== undefined && (!stary || stary.vysledek_domaci === undefined);
                 const potrebujeOpravitKoloVDB = stary && (stary.kolo !== spravneKoloTurnaje);
 
-                // 🚀 PROFI JISTIČ: Pokud zápas v DB ještě neexistuje (!stary), ihned ho vytvoříme
                 const jeNovyZapasVDB = !stary;
 
                 if (jeNovyZapasVDB || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB) {
@@ -1034,11 +1017,9 @@ async function startEnterpriseApplication() {
     console.log("👑 CLOUD-NATIVE DAEMON: Inicializuji životní cyklus trvalého mozku...");
     console.log("=========================================================================");
 
-    // 1. Spustíme reaktivní spouštěcí server propojený na Firebase Chronos dispečink
     http.createServer((req, res) => {
         console.log(`📡 PING PŘIJAT: Cloudový plánovač udeřil do serveru. Probouzím RAM a odpaluji Heartbeat...`);
         
-        // Spustíme kontrolu API asynchronně na pozadí, ať neblokujeme rychlou HTTP odpověď 200 OK pro Firebase
         providniApiHeartbeat().catch(err => console.error("❌ Chyba při reaktivním spuštění:", err));
 
         res.writeHead(200, { "Content-Type": "text/plain" });
@@ -1047,11 +1028,9 @@ async function startEnterpriseApplication() {
         console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen a připraven pro Render.`);
     });
 
-    // 2. Připojíme dlouhoběžící vnitřní Firestore streamy
     inicializujLiveFirestoreStreams();
 
     console.log("🛰️ BOOT STRAP: Rádiové streamy nahozeny. Čekám na kompletní doručení signálů od pošťáka...");
 }
 
-// Odpálení aplikace
 startEnterpriseApplication();
