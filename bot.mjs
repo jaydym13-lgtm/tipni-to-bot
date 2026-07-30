@@ -99,7 +99,7 @@ const slovnikTymu = {
     "Aston Villa FC": "Aston Villa", "Aston Villa": "Aston Villa",
     "AFC Bournemouth": "Bournemouth", "Bournemouth": "Bournemouth",
     "Brentford FC": "Brentford", "Brentford": "Brentford",
-    "Brighton & Hove Albion FC": "Brighton", "Brighton & Hove Albion": "Brighton", "Brighton": "Brighton",
+    "Brighton & Hove Albion FC": "Brighton", "Brighton & Hove Albion": "Brighton", "Brighton and Hove Albion": "Brighton", "Brighton": "Brighton",
     "Chelsea FC": "Chelsea", "Chelsea": "Chelsea",
     "Coventry City FC": "Coventry", "Coventry City": "Coventry", "Coventry": "Coventry",
     "Crystal Palace FC": "Crystal Palace", "Crystal Palace": "Crystal Palace",
@@ -128,7 +128,7 @@ const slovnikTymu = {
     "HC Olomouc": "Olomouc",
     "BK Mladá Boleslav": "Mladá Boleslav", "BK Mlada Boleslav": "Mladá Boleslav",
     "HC Škoda Plzeň": "Plzeň", "HC Skoda Plzen": "Plzeň",
-    "HC Energie Karlovy Vary": "Karlovy Vary",
+    "HC Energie Karlovy Vary": "K. Vary", "Energie Karlovy Vary": "K. Vary", "Karlovy Vary": "K. Vary",
     "Rytíři Kladno": "Kladno", "Rytiri Kladno": "Kladno",
     "Banes Motor České Budějovice": "Č. Budějovice", "HC Motor České Budějovice": "Č. Budějovice", "Motor České Budějovice": "Č. Budějovice"
 };
@@ -976,11 +976,14 @@ async function providniApiHeartbeat() {
 
                 const jeNovyZapasVDB = !stary;
 
-                if (jeNovyZapasVDB || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB) {
+                // 🔥 KONTROLA ZDA JE POTŘEBA OPAVIT NÁZEV TÝMU ZÍSKANÝ ZE SLOVNÍKU
+                const potrebujeOpravitNazevTymu = stary && (stary.domaci !== domaci || stary.hoste !== hoste);
+
+                if (jeNovyZapasVDB || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB || potrebujeOpravitNazevTymu) {
                     console.log(`💾 AUTO-SYNC FIREBASE [${leagueName}]: ${finalDomaci} - ${finalHoste} (${spravneKoloTurnaje})`);
                     const syncPayload = {
-                        domaci: finalDomaci,
-                        hoste: finalHoste,
+                        domaci: domaci,
+                    hoste: hoste,
                         apiStatus: status,
                         kolo: spravneKoloTurnaje,
                         isPlayoff: isPlayoff,
