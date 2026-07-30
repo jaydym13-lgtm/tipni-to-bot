@@ -22,8 +22,8 @@ const LIGY_API_MAPA = {
     "MS v hokeji": { id: "4859", provider: "THESPORTSDB" }
 };
 
-// Seznam lig, které má bot v tomto běhu živě obsluhovat
-const SEZNAM_LIG = (process.env.ACTIVE_LEAGUES || "Chance Liga,MS ve fotbale")
+// Seznam lig, které má bot v tomto běhu živě obsluhovat (Rozšířeno o Premier League a Ligu národů)
+const SEZNAM_LIG = (process.env.ACTIVE_LEAGUES || "Chance Liga,Premier League,Liga národů,MS ve fotbale,Tipsport Extraliga,MS v hokeji")
     .split(",")
     .map(l => l.trim())
     .filter(Boolean);
@@ -93,7 +93,16 @@ const slovnikTymu = {
     "Zlin": "Zlín", "FC Zlín": "Zlín", "Fastav Zlín": "Zlín",
     "Bohemians 1905": "Bohemians 1905", "Bohemians Praha 1905": "Bohemians 1905",
     "Zbrojovka Brno": "Zbrojovka Brno", "FC Zbrojovka Brno": "Zbrojovka Brno",
-    "Artis Brno": "Artis Brno", "SK Líšeň": "Artis Brno"
+    "Artis Brno": "Artis Brno", "SK Líšeň": "Artis Brno",
+    // 🏴󠁧󠁢󠁥󠁮󠁧󠁿 PREMIER LEAGUE - KRÁTKÉ ČESKÉ NÁZVY
+    "Manchester City": "Man. City", "Manchester United": "Man. United", "Liverpool": "Liverpool",
+    "Arsenal": "Arsenal", "Chelsea": "Chelsea", "Tottenham": "Tottenham", "Tottenham Hotspur": "Tottenham",
+    "Aston Villa": "Aston Villa", "Newcastle": "Newcastle", "Newcastle United": "Newcastle",
+    "West Ham": "West Ham", "West Ham United": "West Ham", "Brighton": "Brighton", "Brighton & Hove Albion": "Brighton",
+    "Everton": "Everton", "Fulham": "Fulham", "Brentford": "Brentford", "Bournemouth": "Bournemouth",
+    "Wolverhampton Wanderers": "Wolves", "Wolves": "Wolves", "Crystal Palace": "Crystal Palace",
+    "Nottingham Forest": "Nottingham", "Leicester": "Leicester", "Leicester City": "Leicester",
+    "Ipswich": "Ipswich", "Ipswich Town": "Ipswich", "Southampton": "Southampton"
 };
 
 // --- 🧮 POSVÁTNÁ MATEMATIKA BODŮ ---
@@ -278,7 +287,94 @@ async function rekonstruujAgregatyVsechny(forceWriteHistory = false) {
     }
 }
 
+// 🤖 AUTONOMNÍ FAIR-PLAY GENERÁTOR TOP ZÁPASŮ
+async function autoGenerujTopZapasyProLigu(leagueName) {
+    const pravidla = PRAVIDLA_LIG[leagueName];
+    if (!pravidla || !pravidla.hasTopMatch) return; // Liga nepodporuje TOP zápas
+
+    const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
+    const zapasyPole = Object.entries(centralMatches).map(([id, z]) => ({ ...z, id }));
+    if (zapasyPole.length === 0) return;
+
+    // Seznam známých derby a šlágrů pro přidělení atraktivitního bonusu
+    const DERBY_SLAGRY = [
+        "Sparta-Slavia", "Slavia-Sparta", "Plzeň-Sparta", "Sparta-Plzeň", "Slavia-Plzeň", "Plzeň-Slavia",
+        "Arsenal-Tottenham", "Tottenham-Arsenal", "Man. City-Liverpool", "Liverpool-Man. City",
+        "Man. United-Man. City", "Man. City-Man. United", "Arsenal-Chelsea", "Chelsea-Arsenal",
+        "Liverpool-Everton", "Everton-Liverpool", "Arsenal-Man. City", "Man. City-Arsenal"
+    ];
+
+    // 1. Spočítáme, kolikrát už každý tým v sezóně figuroval v TOP zápase
+    const topUcastTymu = {};
+    zapasyPole.forEach(z => {
+        if (z.isTopMatch) {
+            topUcastTymu[z.domaci] = (topUcastTymu[z.domaci] || 0) + 1;
+            topUcastTymu[z.hoste] = (topUcastTymu[z.hoste] || 0) + 1;
+        }
+    });
+
+    // 2. Seskupíme zápasy podle jednotlivých kol
+    const kolaMap = {};
+    zapasyPole.forEach(z => {
+        const k = String(z.kolo || "Šampionát").trim();
+        if (!kolaMap[k]) kolaMap[k] = [];
+        kolaMap[k].push(z);
+    });
+
+    // 3. Projdeme každé kolo a zkontrolujeme, zda má vybraný TOP zápas
+    for (const [koloNazev, zapasyVKole] of Object.entries(kolaMap)) {
+        const uzMaTop = zapasyVKole.some(z => z.isTopMatch);
+        if (uzMaTop) continue; // Admin nebo bot už pro toto kolo TOP zápas vybral
+
+        // Vyfiltrujeme pouze budoucí/neodehrané zápasy v daném kole
+        const neodehrane = zapasyVKole.filter(z => z.vysledek_domaci === undefined && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+        if (neodehrane.length === 0) continue;
+
+        // Spočítáme férovostní skóre pro každý kandidátský zápas
+        let nejlepsiZapas = null;
+        let nejvyssiSkore = -Infinity;
+
+        neodehrane.forEach(match => {
+            let skore = 100;
+
+            // FÉR-PLAY PENALIZACE: Čím vícekrát už týmy v TOP byly, tím nižší priority mají
+            const ucastDomaci = topUcastTymu[match.domaci] || 0;
+            const ucastHoste = topUcastTymu[match.hoste] || 0;
+            skore -= (ucastDomaci + ucastHoste) * 25;
+
+            // DERBY / ŠLÁGR BONUS
+            const dvojice = `${match.domaci}-${match.hoste}`;
+            if (DERBY_SLAGRY.some(d => d.toLowerCase() === dvojice.toLowerCase())) {
+                skore += 40;
+            }
+
+            if (skore > nejvyssiSkore) {
+                nejvyssiSkore = skore;
+                nejlepsiZapas = match;
+            }
+        });
+
+        // 4. Pokud bot našel vítězný zápas, označí ho a uloží do Firestore
+        if (nejlepsiZapas) {
+            console.log(`🔥 AUTO TOP MATCH [${leagueName} - ${koloNazev}]: Vybráno ${nejlepsiZapas.domaci} vs ${nejlepsiZapas.hoste} (Skóre: ${nejvyssiSkore})`);
+            RAM_CENTRAL_MATCHES[leagueName][nejlepsiZapas.id].isTopMatch = true;
+
+            try {
+                await db.collection("ligy").doc(leagueName)
+                    .collection("sezony").doc(SEZONA_ID)
+                    .collection("zapasy").doc(nejlepsiZapas.id)
+                    .set({ isTopMatch: true }, { merge: true });
+            } catch (e) {
+                console.error(`❌ Selhal automatický zápis TOP zápasu pro ${nejlepsiZapas.id}:`, e);
+            }
+        }
+    }
+}
+
 async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false) {
+    // 🔥 AUTOMATICKÝ GENERÁTOR TOP ZÁPASŮ PŘED VYPOČTENÍM AGREGÁTŮ
+    await autoGenerujTopZapasyProLigu(leagueName);
+
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
 
@@ -595,7 +691,15 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
 
     await uploadToR2(leagueName, "leaderboard.json", leaderboardJson);
 
-    const rozpisJson = { zapasyMapa: centralMatches, aktualizovano: timestampNow };
+    // 🧠 AUTOMATICKÁ DETEKCE A OBSAH ROZPISU S PRÍZNAKEM hasMatches (Pro auto-skrývání lig bez zápasů)
+    const pocetZapasu = Object.keys(centralMatches).length;
+    const hasMatches = pocetZapasu > 0;
+
+    const rozpisJson = { 
+        zapasyMapa: centralMatches, 
+        hasMatches: hasMatches, 
+        aktualizovano: timestampNow 
+    };
     await uploadToR2(leagueName, "rozpis.json", rozpisJson);
 
     if (forceWriteHistory) {
