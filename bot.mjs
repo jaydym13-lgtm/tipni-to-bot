@@ -881,8 +881,9 @@ async function providniApiHeartbeat() {
                     if (item.strTimestamp) {
                         matchIsoDate = new Date(item.strTimestamp).toISOString();
                     } else if (item.dateEvent) {
-                        const timeStr = item.strTime ? item.strTime : "00:00:00";
-                        matchIsoDate = new Date(`${item.dateEvent}T${timeStr}Z`).toISOString();
+                        const timeStr = item.strTime || "00:00:00";
+                        const cleanTime = timeStr.includes("Z") || timeStr.includes("+") ? timeStr : `${timeStr}Z`;
+                        matchIsoDate = new Date(`${item.dateEvent}T${cleanTime}`).toISOString();
                     }
 
                     return {
