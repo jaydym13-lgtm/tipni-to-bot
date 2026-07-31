@@ -322,7 +322,6 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
     const zapasyPole = Object.entries(centralMatches).map(([id, z]) => ({ ...z, id }));
     if (zapasyPole.length === 0) return;
 
-    // Seznam známých derby a šlágrů pro přidělení atraktivitního bonusu
     const DERBY_SLAGRY = [
         "Sparta-Slavia", "Slavia-Sparta", "Plzeň-Sparta", "Sparta-Plzeň", "Slavia-Plzeň", "Plzeň-Slavia",
         "Arsenal-Tottenham", "Tottenham-Arsenal", "Man. City-Liverpool", "Liverpool-Man. City",
@@ -330,7 +329,29 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
         "Liverpool-Everton", "Everton-Liverpool", "Arsenal-Man. City", "Man. City-Arsenal"
     ];
 
-    // 2. Seskupíme zápasy podle jednotlivých kol
+    // 1. Spočítáme celkovou účast v TOP pro férovostní skóre
+    const topUcastTymu = {};
+    zapasyPole.forEach(z => {
+        if (z.isTopMatch) {
+            topUcastTymu[z.domaci] = (topUcastTymu[z.domaci] || 0) + 1;
+            topUcastTymu[z.hoste] = (topUcastTymu[z.hoste] || 0) + 1;
+        }
+    });
+
+    // Pomocná kalkulačka atraktivity zápasu
+    const spocitejSkoreZapasu = (m) => {
+        let skore = 100;
+        const ucastDom = topUcastTymu[m.domaci] || 0;
+        const ucastHos = topUcastTymu[m.hoste] || 0;
+        skore -= (ucastDom + ucastHos) * 25;
+        const dvojice = `${m.domaci}-${m.hoste}`;
+        if (DERBY_SLAGRY.some(d => d.toLowerCase() === dvojice.toLowerCase())) {
+            skore += 40;
+        }
+        return skore;
+    };
+
+    // 2. Seskupení zápasů podle kol
     const kolaMap = {};
     zapasyPole.forEach(z => {
         const k = String(z.kolo || "Šampionát").trim();
@@ -338,17 +359,24 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
         kolaMap[k].push(z);
     });
 
-    // 3. Projdeme každé kolo a zavedeme přísnou gilotinu (MAX 1 TOP ZÁPAS NA KOLO)
+    // 3. Procházíme jednotlivá kola a aplikujeme limit max. 1 TOP zápas
     for (const [koloNazev, zapasyVKole] of Object.entries(kolaMap)) {
         const topZapasyVKole = zapasyVKole.filter(z => z.isTopMatch);
 
+        // ✂️ GILOTINA: Pokud je v kole víc než 1 TOP zápas, seřadíme je podle skóre a ponecháme jen ten NEJATRAKTIVNĚJŠÍ
         if (topZapasyVKole.length > 1) {
-            // ✂️ GILOTINA: Pokud je v kole omylem víc než 1 TOP zápas, ponecháme jen první a ostatní nemilosrdně osekáme!
-            console.warn(`⚠️ [${leagueName} - ${koloNazev}]: Detekováno ${topZapasyVKole.length} TOP zápasů naraz! Spouštím čistku...`);
-            const [ponechat, ...prebyvajici] = topZapasyVKole;
+            console.warn(`⚠️ [${leagueName} - ${koloNazev}]: Nalezeno ${topZapasyVKole.length} TOP zápasů! Spouštím čistku...`);
+            
+            topZapasyVKole.sort((a, b) => spocitejSkoreZapasu(b) - spocitejSkoreZapasu(a));
+
+            const winner = topZapasyVKole[0];
+            const prebyvajici = topZapasyVKole.slice(1);
 
             for (const zPrebyvajici of prebyvajici) {
-                RAM_CENTRAL_MATCHES[leagueName][zPrebyvajici.id].isTopMatch = false;
+                zPrebyvajici.isTopMatch = false;
+                if (RAM_CENTRAL_MATCHES[leagueName][zPrebyvajici.id]) {
+                    RAM_CENTRAL_MATCHES[leagueName][zPrebyvajici.id].isTopMatch = false;
+                }
                 try {
                     await db.collection("ligy").doc(leagueName)
                         .collection("sezony").doc(SEZONA_ID)
@@ -359,19 +387,12 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
             continue;
         }
 
+        // Pokud už kolo má přesně 1 platný TOP zápas, nic neměníme
         if (topZapasyVKole.length === 1) {
-            continue; // Kolo už má přesně 1 platný TOP zápas, neděláme nic
+            continue;
         }
 
-        // Pokud kolo nemá žádný TOP zápas, spočítáme úkazy týmů a vybereme nový
-        const topUcastTymu = {};
-        zapasyPole.forEach(z => {
-            if (z.isTopMatch) {
-                topUcastTymu[z.domaci] = (topUcastTymu[z.domaci] || 0) + 1;
-                topUcastTymu[z.hoste] = (topUcastTymu[z.hoste] || 0) + 1;
-            }
-        });
-
+        // Pokud kolo nemá žádný TOP zápas, vybereme ten s nejvyšším skóre
         const neodehrane = zapasyVKole.filter(z => z.vysledek_domaci === undefined && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
         if (neodehrane.length === 0) continue;
 
@@ -379,16 +400,7 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
         let nejvyssiSkore = -Infinity;
 
         neodehrane.forEach(match => {
-            let skore = 100;
-            const ucastDomaci = topUcastTymu[match.domaci] || 0;
-            const ucastHoste = topUcastTymu[match.hoste] || 0;
-            skore -= (ucastDomaci + ucastHoste) * 25;
-
-            const dvojice = `${match.domaci}-${match.hoste}`;
-            if (DERBY_SLAGRY.some(d => d.toLowerCase() === dvojice.toLowerCase())) {
-                skore += 40;
-            }
-
+            const skore = spocitejSkoreZapasu(match);
             if (skore > nejvyssiSkore) {
                 nejvyssiSkore = skore;
                 nejlepsiZapas = match;
@@ -397,7 +409,10 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
 
         if (nejlepsiZapas) {
             console.log(`🔥 AUTO TOP MATCH [${leagueName} - ${koloNazev}]: Vybráno ${nejlepsiZapas.domaci} vs ${nejlepsiZapas.hoste} (Skóre: ${nejvyssiSkore})`);
-            RAM_CENTRAL_MATCHES[leagueName][nejlepsiZapas.id].isTopMatch = true;
+            nejlepsiZapas.isTopMatch = true;
+            if (RAM_CENTRAL_MATCHES[leagueName][nejlepsiZapas.id]) {
+                RAM_CENTRAL_MATCHES[leagueName][nejlepsiZapas.id].isTopMatch = true;
+            }
 
             try {
                 await db.collection("ligy").doc(leagueName)
@@ -1052,10 +1067,8 @@ async function providniApiHeartbeat() {
         }
     }
 
-    if (celkovyDosloKStavoveZmene) {
-        console.log("⚡ Detekována událost v ligách. Přepočítávám RAM a posílám R2 update...");
-        await rekonstruujAgregatyVsechny(celkovyDosloKStavoveZmene);
-    }
+    // 🚀 PERMANENTNÍ SYNC NA R2 PRO VŠECHNY LIGY: Zaručí existenci platných 200 OK JSONů na R2 (zlikviduje 404 v konzoli)
+    await rekonstruujAgregatyVsechny(celkovyDosloKStavoveZmene);
 
     const jeZapasV_OkneBojovehoRezimu = minRozdilDoZapasu <= 6;
     if (celkovyObsahujeAktivniZapas || jeZapasV_OkneBojovehoRezimu) {
