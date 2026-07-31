@@ -865,19 +865,22 @@ async function providniApiHeartbeat() {
 
                 matches = rawItems.map(item => {
                     const statusRaw = item.strStatus || "";
-                    const isFinished = statusRaw === "Match Finished" || statusRaw === "FT" || (item.intHomeScore !== null && item.intAwayScore !== null && statusRaw !== "In Progress");
+                    const isFinished = statusRaw === "Match Finished" || statusRaw === "FT";
                     const isLive = statusRaw === "In Progress" || statusRaw === "1H" || statusRaw === "2H" || statusRaw === "HT";
                     const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
 
-                    const homeScore = (item.intHomeScore !== null && item.intHomeScore !== undefined) ? parseInt(item.intHomeScore) : undefined;
-                    const awayScore = (item.intAwayScore !== null && item.intAwayScore !== undefined) ? parseInt(item.intAwayScore) : undefined;
+                    const hasValidScore = item.intHomeScore !== null && item.intHomeScore !== undefined && item.intAwayScore !== null && item.intAwayScore !== undefined;
+                    const homeScore = (isFinished || isLive) && hasValidScore ? parseInt(item.intHomeScore) : undefined;
+                    const awayScore = (isFinished || isLive) && hasValidScore ? parseInt(item.intAwayScore) : undefined;
 
                     const rawHomeClean = (item.strHomeTeam || "Neznámý").replace(/ Prague/g, " Praha");
                     const rawAwayClean = (item.strAwayTeam || "Neznámý").replace(/ Prague/g, " Praha");
                     const roundNum = parseInt(item.intRound) || 1;
 
                     let matchIsoDate = new Date().toISOString();
-                    if (item.dateEvent) {
+                    if (item.strTimestamp) {
+                        matchIsoDate = new Date(item.strTimestamp).toISOString();
+                    } else if (item.dateEvent) {
                         const timeStr = item.strTime ? item.strTime : "00:00:00";
                         matchIsoDate = new Date(`${item.dateEvent}T${timeStr}Z`).toISOString();
                     }
