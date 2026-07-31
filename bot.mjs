@@ -1023,7 +1023,6 @@ async function providniApiHeartbeat() {
 
                 if (jeNovyZapasVDB || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB || potrebujeOpravitNazevTymu) {
                     console.log(`💾 AUTO-SYNC FIREBASE [${leagueName}]: ${finalDomaci} - ${finalHoste} (${spravneKoloTurnaje})`);
-                    const finalDatum = stary?.datum || match.utcDate;
                     const syncPayload = {
                         domaci: domaci,
                         hoste: hoste,
@@ -1031,7 +1030,7 @@ async function providniApiHeartbeat() {
                         kolo: spravneKoloTurnaje,
                         isPlayoff: isPlayoff,
                         isTopMatch: stary?.isTopMatch || false,
-                        datum: finalDatum
+                        datum: match.utcDate
                     };
                     if (golyDomaci !== undefined) syncPayload.vysledek_domaci = golyDomaci;
                     if (golyHoste !== undefined) syncPayload.vysledek_hoste = golyHoste;
@@ -1045,7 +1044,7 @@ async function providniApiHeartbeat() {
                 RAM_CENTRAL_MATCHES[leagueName][apiId] = {
                     domaci: finalDomaci,
                     hoste: finalHoste,
-                    datum: stary?.datum || match.utcDate,
+                    datum: match.utcDate,
                     isPlayoff: stary?.isPlayoff !== undefined ? stary.isPlayoff : isPlayoff,
                     isTopMatch: stary?.isTopMatch !== undefined ? stary.isTopMatch : (stary?.isTopMatch || false),
                     kolo: spravneKoloTurnaje,
