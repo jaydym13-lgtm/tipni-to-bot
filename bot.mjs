@@ -91,7 +91,7 @@ const slovnikTymu = {
     "Pardubice": "Pardubice", "FK Pardubice": "Pardubice",
     "Jablonec": "Jablonec", "FK Jablonec": "Jablonec",
     "Zlin": "Zlín", "FC Zlín": "Zlín", "Fastav Zlín": "Zlín",
-    "Bohemians 1905": "Bohemians 1905", "Bohemians Praha 1905": "Bohemians 1905",
+    "Bohemians 1905": "Bohemians", "Bohemians Praha 1905": "Bohemians",
     "Zbrojovka Brno": "Zbrojovka Brno", "FC Zbrojovka Brno": "Zbrojovka Brno",
     "Artis Brno": "Artis Brno", "SK Líšeň": "Artis Brno",
     // 🏴󠁧󠁢󠁥󠁮󠁧󠁿 PREMIER LEAGUE 2026/2027 - KRÁTKÉ ČESKÉ NÁZVY
