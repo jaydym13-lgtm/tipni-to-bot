@@ -882,7 +882,6 @@ async function providniApiHeartbeat() {
                     if (rawDateStr) {
                         const parsedDate = new Date(rawDateStr);
                         if (!isNaN(parsedDate.getTime())) {
-                            parsedDate.setHours(parsedDate.getHours() + 2);
                             matchIsoDate = parsedDate.toISOString();
                         }
                     }
