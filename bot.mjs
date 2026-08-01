@@ -878,11 +878,14 @@ async function providniApiHeartbeat() {
                     const roundNum = parseInt(item.intRound) || 1;
 
                     let matchIsoDate = new Date().toISOString();
-                    const rawDateStr = item.strTimestamp || (item.dateEvent ? `${item.dateEvent}T${item.strTime || "00:00:00"}Z` : null);
-                    if (rawDateStr) {
-                        const parsedDate = new Date(rawDateStr);
+                    let rawStr = item.strTimestamp || (item.dateEvent ? `${item.dateEvent}T${item.strTime || "00:00:00"}` : null);
+                    if (rawStr) {
+                        rawStr = rawStr.replace(" ", "T");
+                        if (!rawStr.endsWith("Z") && !rawStr.includes("+") && !rawStr.includes("-")) {
+                            rawStr += "Z";
+                        }
+                        const parsedDate = new Date(rawStr);
                         if (!isNaN(parsedDate.getTime())) {
-                            parsedDate.setHours(parsedDate.getHours() + 2);
                             matchIsoDate = parsedDate.toISOString();
                         }
                     }
