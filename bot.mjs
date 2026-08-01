@@ -878,12 +878,13 @@ async function providniApiHeartbeat() {
                     const roundNum = parseInt(item.intRound) || 1;
 
                     let matchIsoDate = new Date().toISOString();
-                    if (item.strTimestamp) {
-                        matchIsoDate = new Date(item.strTimestamp).toISOString();
-                    } else if (item.dateEvent) {
-                        const timeStr = item.strTime || "00:00:00";
-                        const cleanTime = timeStr.includes("Z") || timeStr.includes("+") ? timeStr : `${timeStr}Z`;
-                        matchIsoDate = new Date(`${item.dateEvent}T${cleanTime}`).toISOString();
+                    const rawDateStr = item.strTimestamp || (item.dateEvent ? `${item.dateEvent}T${item.strTime || "00:00:00"}Z` : null);
+                    if (rawDateStr) {
+                        const parsedDate = new Date(rawDateStr);
+                        if (!isNaN(parsedDate.getTime())) {
+                            parsedDate.setHours(parsedDate.getHours() + 2);
+                            matchIsoDate = parsedDate.toISOString();
+                        }
                     }
 
                     return {
@@ -1018,10 +1019,11 @@ async function providniApiHeartbeat() {
 
                 const jeNovyZapasVDB = !stary;
 
-                // 🔥 KONTROLA ZDA JE POTŘEBA OPAVIT NÁZEV TÝMU ZÍSKANÝ ZE SLOVNÍKU
+                // 🔥 KONTROLA ZDA JE POTŘEBA OPAVIT NÁZEV TÝMU NEBO ČAS ZÁPASU Z API
                 const potrebujeOpravitNazevTymu = stary && (stary.domaci !== domaci || stary.hoste !== hoste);
+                const potrebujeOpravitDatumVDB = stary && (stary.datum !== match.utcDate);
 
-                if (jeNovyZapasVDB || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB || potrebujeOpravitNazevTymu) {
+                if (jeNovyZapasVDB || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB || potrebujeOpravitNazevTymu || potrebujeOpravitDatumVDB) {
                     console.log(`💾 AUTO-SYNC FIREBASE [${leagueName}]: ${finalDomaci} - ${finalHoste} (${spravneKoloTurnaje})`);
                     const syncPayload = {
                         domaci: domaci,
