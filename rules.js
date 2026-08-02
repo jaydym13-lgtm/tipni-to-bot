@@ -30,18 +30,18 @@ export const PRAVIDLA_LIG = {
         roundBonus: 5              // 🔥 +5 bodů za trefení tendence VŠECH zápasů v kole
     },
     "Premier League": {
-            presnyVysledek: 5,
-            chytraTendence: 0,
-            zakladniTendence: 2,
-            golUtechy: 0,
-            playoffBonus: 0,
-            penaltyNenatipovano: -1,   // -1b za nenatipovaný zápas
-            bonusVitez: 10,             // 🔥 10 bodů za správný tip celkového vítěze
-            bonusStrelec: 10,          // 🔥 10 bodů za nejlepšího střelce
-            hasTopMatch: true,         // Mechanika TOP ZÁPASU aktivní
-            topMatchMultiplier: 2,      // 2x násobič zisku
-            roundBonus: 5              // +5 bodů za trefení tendence všech zápasů v kole
-        },
+        presnyVysledek: 6,
+        chytraTendence: 3,
+        zakladniTendence: 2,
+        golUtechy: 1,
+        playoffBonus: 0,
+        penaltyNenatipovano: -1,   // -1b za nenatipovaný zápas
+        bonusVitez: 10,            // 🔥 10 bodů za celkového vítěze
+        bonusStrelec: 10,          // 🔥 10 bodů za nejlepšího střelce
+        hasTopMatch: true,          // Mechanika TOP ZÁPASU aktivní
+        topMatchMultiplier: 2,      // 2x násobič zisku
+        roundBonus: 0              // Bez bonusu za celé kolo
+    },
         "Liga národů": {
             presnyVysledek: 5,
             chytraTendence: 0,
@@ -121,8 +121,8 @@ export const vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, le
 
     let body = 0;
 
-    // ⚽ 1. CHANCE LIGA
-    if (leagueName === "Chance Liga" || leagueName === "Premier League" || leagueName === "Liga národů") {
+    // ⚽ 1. CHANCE LIGA & LIGA NÁRODŮ
+    if (leagueName === "Chance Liga" || leagueName === "Liga národů") {
         const presny = (tD === rD && tH === rH);
         const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
         
@@ -135,8 +135,8 @@ export const vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, le
             body += pravidla.playoffBonus;
         }
     }
-    // ⚽ 2. MS VE FOTBALE
-    else if (leagueName === "MS ve fotbale") {
+    // ⚽ 2. MS VE FOTBALE & PREMIER LEAGUE
+    else if (leagueName === "MS ve fotbale" || leagueName === "Premier League") {
         const presny = (tD === rD && tH === rH);
         const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
         const presneGolyJednoho = (tD === rD || tH === rH);
