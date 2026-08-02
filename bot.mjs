@@ -178,7 +178,8 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
 // --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD) ---
 async function uploadToR2(leagueName, filename, jsonData) {
     try {
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Navýšeno na 500 ms pro zamezení blokací z Cloudflare R2 (429 Rate Limit)
+        await new Promise(resolve => setTimeout(resolve, 500));
         const bodyText = JSON.stringify(jsonData, null, 2);
         const ligaKlic = String(leagueName).replace(/ /g, "_");
         const dynamicPath = `sezony/${SEZONA_ID}/${ligaKlic}/${filename}`;
@@ -827,26 +828,23 @@ async function providniApiHeartbeat() {
 
         const centralneZapasyLigy = Object.values(RAM_CENTRAL_MATCHES[leagueName] || {});
         const maAktivniZapasVRam = centralneZapasyLigy.some(z => z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED");
-        const nyniMs = Date.now();
-        const najblizsiZapasMs = centralneZapasyLigy
-            .filter(z => z.apiStatus === "SCHEDULED" && Date.parse(z.datum) > nyniMs)
-            .reduce((min, z) => Math.min(min, Date.parse(z.datum)), Infinity);
+            const nyniMs = Date.now();
 
-        const minutyDoDalsihoZapasu = (najblizsiZapasMs - nyniMs) / (1000 * 60);
-        const maBudouciZapasBlizko = minutyDoDalsihoZapasu <= 120;
-        const maPrazdnouRam = centralneZapasyLigy.length === 0;
+            // 🎯 OCHRANA PŘED SLEPOU SKVRNOU: Kontrolujeme i neukončené zápasy z posledních 4 hodin (-240 min)!
+            const maNeukoncenyZapasBlizko = centralneZapasyLigy.some(z => {
+                if (z.apiStatus === "FINISHED") return false;
+                const startMs = Date.parse(z.datum);
+                if (isNaN(startMs)) return false;
+                const rozdilMinut = (startMs - nyniMs) / (1000 * 60);
+                return rozdilMinut >= -240 && rozdilMinut <= 120;
+            });
 
-        if (!maPrazdnouRam && !maAktivniZapasVRam && !maBudouciZapasBlizko) {
-            const hodinyDoZapasu = Math.round(minutyDoDalsihoZapasu / 60);
-            const textCasu = isFinite(hodinyDoZapasu) ? `${hodinyDoZapasu} hod` : "nedohlednu";
-            console.log(`💤 SMART SCHEDULER [${leagueName}]: Zápas v ${textCasu}. Šetřím API kredity a přesakuji dotaz.`);
-            
-            if (minutyDoDalsihoZapasu < minRozdilDoZapasu) {
-                minRozdilDoZapasu = minutyDoDalsihoZapasu;
-                pristiZapasIso = new Date(najblizsiZapasMs).toISOString();
+            const maPrazdnouRam = centralneZapasyLigy.length === 0;
+
+            if (!maPrazdnouRam && !maAktivniZapasVRam && !maNeukoncenyZapasBlizko) {
+                console.log(`💤 SMART SCHEDULER [${leagueName}]: Žádný aktivní ani blízký zápas. Šetřím API kredity.`);
+                continue;
             }
-            continue;
-        }
 
         try {
             let matches = [];
