@@ -318,6 +318,11 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
     const pravidla = PRAVIDLA_LIG[leagueName];
     if (!pravidla || !pravidla.hasTopMatch) return;
 
+    // 🛑 SPRÁVNÍ VYPNUTÍ Z ADMIN PANELU
+    if (realLeagueData && realLeagueData.hasTopMatch === false) {
+        return;
+    }
+
     const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
     const zapasyPole = Object.entries(centralMatches).map(([id, z]) => ({ ...z, id }));
     if (zapasyPole.length === 0) return;
@@ -427,8 +432,6 @@ async function autoGenerujTopZapasyProLigu(leagueName) {
 }
 
 async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false) {
-    await autoGenerujTopZapasyProLigu(leagueName);
-
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
 
@@ -438,6 +441,9 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     }
     const leagueDoc = await db.collection("ligy").doc(leagueName).get().catch(() => null);
     const realLeagueData = leagueDoc && leagueDoc.exists ? leagueDoc.data() : null;
+
+    // Generátor zavoláme až po načtení nastavení z Firestore
+    await autoGenerujTopZapasyProLigu(leagueName, realLeagueData);
 
     const zebricekMapa = {};
     const mapaPrezdivek = {};
