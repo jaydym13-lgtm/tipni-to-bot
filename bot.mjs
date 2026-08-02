@@ -85,7 +85,7 @@ const slovnikTymu = {
     "Sigma Olomouc": "Olomouc", "SK Sigma Olomouc": "Olomouc",
     "Slovan Liberec": "Liberec", "FC Slovan Liberec": "Liberec",
     "Mlada Boleslav": "Ml. Boleslav", "FK Mladá Boleslav": "Ml. Boleslav", "Mladá Boleslav": "Ml. Boleslav",
-    "Hradec Kralove": "Hr. Králové", "FC Hradec Králové": "Hr. Králové",
+    "Hradec Kralove": "Hr. Králové", "FC Hradec Králové": "Hr. Králové", "Hradec Králové": "Hr. Králové",
     "Slovacko": "Slovácko", "1.FC Slovácko": "Slovácko", "1. FC Slovácko": "Slovácko",
     "Teplice": "Teplice", "FK Teplice": "Teplice",
     "Pardubice": "Pardubice", "FK Pardubice": "Pardubice",
