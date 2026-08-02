@@ -314,7 +314,7 @@ async function rekonstruujAgregatyVsechny(forceWriteHistory = false) {
 }
 
 // 🤖 AUTONOMNÍ FAIR-PLAY GENERÁTOR TOP ZÁPASŮ
-async function autoGenerujTopZapasyProLigu(leagueName) {
+async function autoGenerujTopZapasyProLigu(leagueName, realLeagueData) {
     const pravidla = PRAVIDLA_LIG[leagueName];
     if (!pravidla || !pravidla.hasTopMatch) return;
 
