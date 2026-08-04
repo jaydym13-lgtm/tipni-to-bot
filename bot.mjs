@@ -1040,9 +1040,9 @@ async function providniApiHeartbeat() {
                         apiStatus: status,
                         kolo: spravneKoloTurnaje,
                         isPlayoff: isPlayoff,
-                        isTopMatch: stary?.isTopMatch || false,
                         datum: match.utcDate
                     };
+                    if (stary?.isTopMatch) syncPayload.isTopMatch = true;
                     if (golyDomaci !== undefined) syncPayload.vysledek_domaci = golyDomaci;
                     if (golyHoste !== undefined) syncPayload.vysledek_hoste = golyHoste;
                     if (postupVal) syncPayload.postup = postupVal;
@@ -1057,7 +1057,7 @@ async function providniApiHeartbeat() {
                     hoste: finalHoste,
                     datum: match.utcDate,
                     isPlayoff: stary?.isPlayoff !== undefined ? stary.isPlayoff : isPlayoff,
-                    isTopMatch: stary?.isTopMatch !== undefined ? stary.isTopMatch : (stary?.isTopMatch || false),
+                    isTopMatch: stary?.isTopMatch || false,
                     kolo: spravneKoloTurnaje,
                     stage: match.stage || stary?.stage || "",
                     vysledek_domaci: golyDomaci !== undefined ? golyDomaci : stary?.vysledek_domaci,
