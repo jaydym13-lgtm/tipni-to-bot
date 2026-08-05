@@ -379,16 +379,18 @@ async function autoGenerujTopZapasyProLigu(leagueName, realLeagueData) {
             const prebyvajici = topZapasyVKole.slice(1);
 
             for (const zPrebyvajici of prebyvajici) {
-                zPrebyvajici.isTopMatch = false;
-                if (RAM_CENTRAL_MATCHES[leagueName][zPrebyvajici.id]) {
-                    RAM_CENTRAL_MATCHES[leagueName][zPrebyvajici.id].isTopMatch = false;
+                if (zPrebyvajici.isTopMatch) {
+                    zPrebyvajici.isTopMatch = false;
+                    if (RAM_CENTRAL_MATCHES[leagueName][zPrebyvajici.id]) {
+                        RAM_CENTRAL_MATCHES[leagueName][zPrebyvajici.id].isTopMatch = false;
+                    }
+                    try {
+                        await db.collection("ligy").doc(leagueName)
+                            .collection("sezony").doc(SEZONA_ID)
+                            .collection("zapasy").doc(zPrebyvajici.id)
+                            .set({ isTopMatch: false }, { merge: true });
+                    } catch (e) {}
                 }
-                try {
-                    await db.collection("ligy").doc(leagueName)
-                        .collection("sezony").doc(SEZONA_ID)
-                        .collection("zapasy").doc(zPrebyvajici.id)
-                        .set({ isTopMatch: false }, { merge: true });
-                } catch (e) {}
             }
             continue;
         }
@@ -413,7 +415,7 @@ async function autoGenerujTopZapasyProLigu(leagueName, realLeagueData) {
             }
         });
 
-        if (nejlepsiZapas) {
+        if (nejlepsiZapas && !nejlepsiZapas.isTopMatch) {
             console.log(`🔥 AUTO TOP MATCH [${leagueName} - ${koloNazev}]: Vybráno ${nejlepsiZapas.domaci} vs ${nejlepsiZapas.hoste} (Skóre: ${nejvyssiSkore})`);
             nejlepsiZapas.isTopMatch = true;
             if (RAM_CENTRAL_MATCHES[leagueName][nejlepsiZapas.id]) {
@@ -815,6 +817,22 @@ async function providniApiHeartbeat() {
     let celkovyObsahujeAktivniZapas = false;
     let minRozdilDoZapasu = Infinity;
     let pristiZapasIso = null;
+
+    // 🧠 Výpočet nejbližšího budoucího zápasu přímo z RAM (nezávisle na API)
+    for (const lName of SEZNAM_LIG) {
+        const cZapasy = Object.values(RAM_CENTRAL_MATCHES[lName] || {});
+        for (const z of cZapasy) {
+            if (z.vysledek_domaci !== undefined || z.apiStatus === "FINISHED") continue;
+            const startMs = Date.parse(z.datum);
+            if (!isNaN(startMs)) {
+                const rozdilMin = (startMs - Date.now()) / (1000 * 60);
+                if (rozdilMin > 0 && rozdilMin < minRozdilDoZapasu) {
+                    minRozdilDoZapasu = rozdilMin;
+                    pristiZapasIso = z.datum;
+                }
+            }
+        }
+    }
 
     for (const leagueName of SEZNAM_LIG) {
         const leagueConfig = LIGY_API_MAPA[leagueName] || { id: "WC", provider: "MANUAL" };
