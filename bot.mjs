@@ -48,8 +48,7 @@ const db = admin.firestore();
 // --- 🧠 IN-MEMORY RAM STATE (Stavová paměť daemona) ---
 const RAM_USERS_PROFILES = {}; 
 const RAM_USERS_TIPS = {};     
-const RAM_CENTRAL_MATCHES = {};
-const PROCESSED_FREEZE_MATCHES = new Set(); 
+const RAM_CENTRAL_MATCHES = {}; 
 
 // 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
 const RAM_BOT_CONFIG = {
@@ -997,7 +996,10 @@ async function providniApiHeartbeat() {
                     celkovyObsahujeAktivniZapas = true;
                 }
 
-                if (status !== "FINISHED" && matchStarted && !PROCESSED_FREEZE_MATCHES.has(apiId)) {
+                const stary = RAM_CENTRAL_MATCHES[leagueName] ? RAM_CENTRAL_MATCHES[leagueName][apiId] : null;
+                let spyJizOdeslano = stary?.spyUploaded || false;
+
+                if (status !== "FINISHED" && matchStarted && !spyJizOdeslano) {
                     console.log(`🔒 LOCK T-0 [${leagueName}]: Výkop zápasu ${domaci} – ${hoste}. Zmrazuji tipy!`);
                     
                     const tipyProZapasPole = [];
@@ -1020,11 +1022,10 @@ async function providniApiHeartbeat() {
                     });
 
                     await uploadToR2(leagueName, `spy_zapas_${apiId}.json`, { tipy: tipyProZapasPole, aktualizovano: nyni.toISOString() });
-                    PROCESSED_FREEZE_MATCHES.add(apiId);
+                    spyJizOdeslano = true;
                     celkovyDosloKStavoveZmene = true;
                 }
 
-                const stary = RAM_CENTRAL_MATCHES[leagueName] ? RAM_CENTRAL_MATCHES[leagueName][apiId] : null;
                 if (!stary || stary.apiStatus !== status || stary.vysledek_domaci !== golyDomaci || stary.vysledek_hoste !== golyHoste || stary.postup !== postupVal) {
                     celkovyDosloKStavoveZmene = true;
                 }
@@ -1085,7 +1086,8 @@ async function providniApiHeartbeat() {
                     vysledek_domaci: golyDomaci !== undefined ? golyDomaci : stary?.vysledek_domaci,
                     vysledek_hoste: golyHoste !== undefined ? golyHoste : stary?.vysledek_hoste,
                     apiStatus: status,
-                    postup: postupVal || stary?.postup || ""
+                    postup: postupVal || stary?.postup || "",
+                    spyUploaded: spyJizOdeslano
                 };
             }
 
