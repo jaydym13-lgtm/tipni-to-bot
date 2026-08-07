@@ -908,6 +908,12 @@ async function providniApiHeartbeat() {
                         }
                         const parsedDate = new Date(rawStr);
                         if (!isNaN(parsedDate.getTime())) {
+                            // 🤖 Plně automatický výpočet posunu pro Europe/Prague (Léto: +2h, Zima: +1h)
+                            const czTime = new Date(parsedDate.toLocaleString("en-US", { timeZone: "Europe/Prague" }));
+                            const utcTime = new Date(parsedDate.toLocaleString("en-US", { timeZone: "UTC" }));
+                            const diffHours = Math.round((czTime - utcTime) / (1000 * 60 * 60));
+
+                            parsedDate.setHours(parsedDate.getHours() + diffHours);
                             matchIsoDate = parsedDate.toISOString();
                         }
                     }
