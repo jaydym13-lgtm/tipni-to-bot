@@ -908,8 +908,6 @@ async function providniApiHeartbeat() {
                         }
                         const parsedDate = new Date(rawStr);
                         if (!isNaN(parsedDate.getTime())) {
-                            // Posun o +2 hodiny pro korekci času z TheSportsDB API
-                            parsedDate.setHours(parsedDate.getHours() + 2);
                             matchIsoDate = parsedDate.toISOString();
                         }
                     }
