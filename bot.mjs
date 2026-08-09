@@ -1107,7 +1107,9 @@ async function providniApiHeartbeat() {
     }
 
     // 🚀 PERMANENTNÍ SYNC NA R2 PRO VŠECHNY LIGY: Zaručí existenci platných 200 OK JSONů na R2 (zlikviduje 404 v konzoli)
-    await rekonstruujAgregatyVsechny(celkovyDosloKStavoveZmene);
+    if (celkovyDosloKStavoveZmene) {
+        await rekonstruujAgregatyVsechny(true);
+    }
 
     const jeZapasV_OkneBojovehoRezimu = minRozdilDoZapasu <= 6;
     if (celkovyObsahujeAktivniZapas || jeZapasV_OkneBojovehoRezimu) {
