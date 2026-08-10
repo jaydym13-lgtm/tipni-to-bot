@@ -1110,27 +1110,38 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         }
     }
 
-    try {
-        const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
-        await pulsRef.set({
-            verzeRozpisu: admin.firestore.FieldValue.increment(1),
-            verzeZebricku: admin.firestore.FieldValue.increment(1),
-            aktualizovano: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-        console.log(`📡 PULS SYNC [${leagueName}]: Firestore puls úspěšně aktualizován.`);
-    } catch (pulsErr) {
-        console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
+    if (forceWriteHistory) {
+        try {
+            const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
+            await pulsRef.set({
+                verzeRozpisu: admin.firestore.FieldValue.increment(1),
+                verzeZebricku: admin.firestore.FieldValue.increment(1),
+                aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log(`📡 PULS SYNC [${leagueName}]: Firestore puls aktualizován.`);
+        } catch (pulsErr) {
+            console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
+        }
     }
 }
 
+let isHeartbeatRunning = false;
+
 async function providniApiHeartbeat() {
-    console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Heartbeat kontrola sportovního API pro ligy: ${SEZNAM_LIG.join(', ')}...`);
-    
-    if (!RAM_BOT_CONFIG.active) {
-        console.log("⛔ BOT MANUÁLNĚ VYPNUT: Ovládací panel hlásí force_stop. Spím a nezatěžuji API...");
-        setTimeout(providniApiHeartbeat, RAM_BOT_CONFIG.waitInterval * 60 * 1000);
+    if (isHeartbeatRunning) {
+        console.log("⏳ HEARTBEAT ALREADY RUNNING: Přeskakuji paralelní požadavek...");
         return;
     }
+    isHeartbeatRunning = true;
+
+    try {
+        console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Heartbeat kontrola sportovního API pro ligy: ${SEZNAM_LIG.join(', ')}...`);
+        
+        if (!RAM_BOT_CONFIG.active) {
+            console.log("⛔ BOT MANUÁLNĚ VYPNUT: Ovládací panel hlásí force_stop. Spím a nezatěžuji API...");
+            setTimeout(providniApiHeartbeat, RAM_BOT_CONFIG.waitInterval * 60 * 1000);
+            return;
+        }
 
     const dbKey = process.env.THESPORTSDB_KEY;
 
@@ -1439,10 +1450,16 @@ async function providniApiHeartbeat() {
     } else {
         console.log(`💤 STATUS: Klid zbraní. Nejbližší zápas je za ${Math.round(minRozdilDoZapasu)} min.`);
     }
+} catch (err) {
+        console.error(`❌ Chyba v heartbeat smyčce:`, err);
+    } finally {
+        isHeartbeatRunning = false;
+    }
 }
 
 // --- 🌐 LIFECYCLE INITIALIZATION BOOTSTRAP ---
 async function startEnterpriseApplication() {
+
     console.log("=========================================================================");
     console.log("👑 CLOUD-NATIVE DAEMON: Inicializuji životní cyklus trvalého mozku...");
     console.log("=========================================================================");
