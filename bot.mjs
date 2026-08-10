@@ -175,13 +175,23 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
 };
 
 // --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD) ---
+// --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD S ZÁMKEM PARALELNÍCH ZÁPISŮ A DEBOUNCEREM) ---
+const activeR2Uploads = new Set();
+
 async function uploadToR2(leagueName, filename, jsonData) {
+    const ligaKlic = String(leagueName).replace(/ /g, "_");
+    const dynamicPath = `sezony/${SEZONA_ID}/${ligaKlic}/${filename}`;
+
+    // 🛡️ OCHRANNÝ JISTIČ PARALELIZMU: Čekáme na dokončení probíhajícího uploadu pro stejný objekt
+    while (activeR2Uploads.has(dynamicPath)) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    activeR2Uploads.add(dynamicPath);
+
     try {
-        // Navýšeno na 500 ms pro zamezení blokací z Cloudflare R2 (429 Rate Limit)
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 300));
         const bodyText = JSON.stringify(jsonData, null, 2);
-        const ligaKlic = String(leagueName).replace(/ /g, "_");
-        const dynamicPath = `sezony/${SEZONA_ID}/${ligaKlic}/${filename}`;
         await r2Client.send(new PutObjectCommand({
             Bucket: BUCKET_NAME,
             Key: dynamicPath,
@@ -190,7 +200,28 @@ async function uploadToR2(leagueName, filename, jsonData) {
         }));
     } catch (err) {
         console.error(`❌ Chyba distribuce souboru ${filename} (${leagueName}) do R2:`, err);
+    } finally {
+        activeR2Uploads.delete(dynamicPath);
     }
+}
+
+// ⏱️ DEBOUNCE JISTIČ: Slučuje smršť Firestore událostí do jediného klidného zápisu
+let rekonstrukceTimer = null;
+let forceHistoryPending = false;
+
+function planujRekonstrukciAgregatu(forceWriteHistory = false) {
+    if (forceWriteHistory) forceHistoryPending = true;
+
+    if (rekonstrukceTimer) {
+        clearTimeout(rekonstrukceTimer);
+    }
+
+    rekonstrukceTimer = setTimeout(async () => {
+        const historyFlag = forceHistoryPending;
+        forceHistoryPending = false;
+        rekonstrukceTimer = null;
+        await rekonstruujAgregatyVsechny(historyFlag);
+    }, 1500);
 }
 
 // --- 📡 DATA PIPELINES (Firestore Real-time Sync) ---
@@ -262,7 +293,7 @@ function inicializujLiveFirestoreStreams() {
                   RAM_USERS_TIPS[uid] = sData.souteze || {};
               }
           });
-          rekonstruujAgregatyVsechny();
+          planujRekonstrukciAgregatu();
           emitReadySignalGlobal("tips");
       }, (err) => console.error("❌ Kritický výpadek databázového streamu sezón:", err));
 
@@ -300,7 +331,7 @@ function inicializujLiveFirestoreStreams() {
                     };
                 }
             });
-            rekonstruujAgregatyVsechny();
+            planujRekonstrukciAgregatu();
             emitReadySignalGlobal("matches");
         }, (err) => console.error(`❌ Chyba streamu zápasů pro ${leagueName}:`, err));
     });
