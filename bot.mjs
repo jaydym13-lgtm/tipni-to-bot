@@ -17,7 +17,7 @@ const LIGY_API_MAPA = {
     "Chance Liga": { id: "4631", provider: "THESPORTSDB" },
     "Premier League": { id: "4328", provider: "THESPORTSDB" },
     "MS ve fotbale": { id: "4429", provider: "THESPORTSDB" },
-    "Liga národů": { id: "4708", provider: "THESPORTSDB" },
+    "Liga národů": { id: "4490", provider: "THESPORTSDB" },
     "Tipsport Extraliga": { id: "4923", provider: "THESPORTSDB" },
     "MS v hokeji": { id: "4859", provider: "THESPORTSDB" }
 };
