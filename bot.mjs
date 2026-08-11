@@ -772,18 +772,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const zebricekMapa = {};
     const mapaPrezdivek = {};
 
-    Object.keys(RAM_USERS_PROFILES).forEach(uid => {
-        const p = RAM_USERS_PROFILES[uid];
-        if (!p.leagues || !p.leagues.includes(leagueName)) return;
-
-        mapaPrezdivek[p.email] = p.nickname;
-        zebricekMapa[p.email] = {
-            uid: uid, email: p.email, nickname: p.nickname, celkemBodu: 0, natipovaneVyhodnocene: 0, nenatipovaneVyhodnocene: 0, presneVysledkyCount: 0,
-            celkemBoduLive: 0, natipovaneVyhodnoceneLive: 0, nenatipovaneVyhodnoceneLive: 0, presneVysledkyCountLive: 0,
-            bodyPoKolech: {}, nejStrelec: '–', vitezMs: '–', nejviceBoduVKole: 0
-        };
-
-        // 🛡️ SERVEROVÝ DETEKTOR STARTU LIGY PRO OCHRANU BOTOVÝCH AGREGÁTŮ
+    // 🛡️ SERVEROVÝ DETEKTOR STARTU LIGY PRO OCHRANU BOTOVÝCH AGREGÁTŮ
     const matchesList = Object.values(centralMatches);
     const isLeagueStarted = matchesList.some(z => {
         const startMs = Date.parse(z.datum);
