@@ -1398,11 +1398,14 @@ async function providniApiHeartbeat() {
 
                 const jeNovyZapasVDB = !stary;
 
-                // 🔥 KONTROLA ZDA JE POTŘEBA OPAVIT NÁZEV TÝMU NEBO ČAS ZÁPASU Z API
+                // 🛡️ OCHRANA PROTI ZASEKNUTÍ V IN_PLAY: Hlídáme změnu stavu API i skóre
+                const zmenilSeApiStatus = stary && (stary.apiStatus !== status);
+                const zmeniloSeSkore = stary && (stary.vysledek_domaci !== golyDomaci || stary.vysledek_hoste !== golyHoste);
+
                 const potrebujeOpravitNazevTymu = stary && (stary.domaci !== domaci || stary.hoste !== hoste);
                 const potrebujeOpravitDatumVDB = stary && (stary.datum !== match.utcDate);
 
-                if (jeNovyZapasVDB || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB || potrebujeOpravitNazevTymu || potrebujeOpravitDatumVDB) {
+                if (jeNovyZapasVDB || zmenilSeApiStatus || zmeniloSeSkore || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB || potrebujeOpravitNazevTymu || potrebujeOpravitDatumVDB) {
                     console.log(`💾 AUTO-SYNC FIREBASE [${leagueName}]: ${finalDomaci} - ${finalHoste} (${spravneKoloTurnaje})`);
                     const syncPayload = {
                         domaci: domaci,
