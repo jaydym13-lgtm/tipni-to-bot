@@ -871,7 +871,16 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                 if (uTip) {
                     bodyZapasu = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zapas.vysledek_domaci, zapas.vysledek_hoste, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
                     zebricekMapa[em].celkemBodu += bodyZapasu; zebricekMapa[em].natipovaneVyhodnocene++;
-                    if (parseInt(uTip.tip_domaci) === parseInt(zapas.vysledek_domaci) && parseInt(uTip.tip_hoste) === parseInt(zapas.vysledek_hoste)) zebricekMapa[em].presneVysledkyCount++;
+                    
+                    const jePresny = parseInt(uTip.tip_domaci) === parseInt(zapas.vysledek_domaci) &&
+                                     parseInt(uTip.tip_hoste) === parseInt(zapas.vysledek_hoste) &&
+                                     (!zapas.isPlayoff || zapas.vysledek_domaci !== zapas.vysledek_hoste || uTip.postup === zapas.postup);
+                    if (jePresny) {
+                        zebricekMapa[em].presneVysledkyCount++;
+                        if (zapas.isTopMatch) {
+                            zebricekMapa[em].presneTopMatchesCount = (zebricekMapa[em].presneTopMatchesCount || 0) + 1;
+                        }
+                    }
                 } else {
                     bodyZapasu = pravidlaLigi.penaltyNenatipovano || 0;
                     zebricekMapa[em].celkemBodu += bodyZapasu;
@@ -890,7 +899,16 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                 if (uTip) {
                     bodyZapasuLive = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, vDomaci, vHoste, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
                     zebricekMapa[em].celkemBoduLive += bodyZapasuLive; zebricekMapa[em].natipovaneVyhodnoceneLive++;
-                    if (parseInt(uTip.tip_domaci) === parseInt(vDomaci) && parseInt(uTip.tip_hoste) === parseInt(vHoste)) zebricekMapa[em].presneVysledkyCountLive++;
+                    
+                    const jePresnyLive = parseInt(uTip.tip_domaci) === parseInt(vDomaci) &&
+                                         parseInt(uTip.tip_hoste) === parseInt(vHoste) &&
+                                         (!zapas.isPlayoff || vDomaci !== vHoste || uTip.postup === zapas.postup);
+                    if (jePresnyLive) {
+                        zebricekMapa[em].presneVysledkyCountLive++;
+                        if (zapas.isTopMatch) {
+                            zebricekMapa[em].presneTopMatchesCountLive = (zebricekMapa[em].presneTopMatchesCountLive || 0) + 1;
+                        }
+                    }
                 } else {
                     bodyZapasuLive = pravidlaLigi.penaltyNenatipovano || 0;
                     zebricekMapa[em].celkemBoduLive += bodyZapasuLive;
@@ -973,6 +991,17 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         return { count, names: nicks.join(', ') };
     });
 
+    // 🔥 NEJVÍC PŘESNÝCH TOP ZÁPASŮ (OFICIÁLNÍ)
+    const vsechnyPresneTop = Object.keys(zebricekMapa).map(email => ({
+        nickname: zebricekMapa[email].nickname,
+        count: zebricekMapa[email].presneTopMatchesCount || 0
+    })).filter(p => p.count > 0);
+    const unikatniPresneTopBadges = [...new Set(vsechnyPresneTop.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3PresneTop = unikatniPresneTopBadges.map(count => {
+        const nicks = vsechnyPresneTop.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
+
     const vsechnyKolaZisky = [];
     Object.keys(zebricekMapa).forEach(em => {
         const nickname = zebricekMapa[em].nickname;
@@ -997,6 +1026,17 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const unikatniPresneBadgesLive = [...new Set(vsechnyPresneLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
     const top3PresneLive = unikatniPresneBadgesLive.map(count => {
         const nicks = vsechnyPresneLive.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
+
+    // 🔥 NEJVÍC PŘESNÝCH TOP ZÁPASŮ (LIVE)
+    const vsechnyPresneTopLive = Object.keys(zebricekMapa).map(email => ({
+        nickname: zebricekMapa[email].nickname,
+        count: zebricekMapa[email].presneTopMatchesCountLive || 0
+    })).filter(p => p.count > 0);
+    const unikatniPresneTopBadgesLive = [...new Set(vsechnyPresneTopLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3PresneTopLive = unikatniPresneTopBadgesLive.map(count => {
+        const nicks = vsechnyPresneTopLive.filter(p => p.count === count).map(p => p.nickname);
         return { count, names: nicks.join(', ') };
     });
 
@@ -1079,8 +1119,10 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         isLive: liveMatchIds.length > 0, 
         mapaPrezdivek: mapaPrezdivek,
         top3Presne: top3Presne,
+        top3PresneTop: top3PresneTop,
         top3Kola: top3Kola,
         top3PresneLive: top3PresneLive,
+        top3PresneTopLive: top3PresneTopLive,
         top3KolaLive: top3KolaLive,
         top3AktualniKolo: top3AktualniKolo,
         aktivniKoloText: aktivniKolo,
