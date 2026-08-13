@@ -867,331 +867,347 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                 const uTip = uSoutezData.tipy ? uSoutezData.tipy[matchId] : null;
 
                 if (jeVyhodnoceny) {
-                    let bodyZapasu = 0;
-                    if (uTip) {
-                        bodyZapasu = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zapas.vysledek_domaci, zapas.vysledek_hoste, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
-                        zebricekMapa[em].celkemBodu += bodyZapasu; zebricekMapa[em].natipovaneVyhodnocene++;
-                        
-                        const jePresny = parseInt(uTip.tip_domaci) === parseInt(zapas.vysledek_domaci) &&
-                                         parseInt(uTip.tip_hoste) === parseInt(zapas.vysledek_hoste) &&
-                                         (!zapas.isPlayoff || zapas.vysledek_domaci !== zapas.vysledek_hoste || uTip.postup === zapas.postup);
-                        if (jePresny) {
-                            zebricekMapa[em].presneVysledkyCount++;
-                            if (zapas.isTopMatch) {
-                                zebricekMapa[em].presneTopMatchesCount = (zebricekMapa[em].presneTopMatchesCount || 0) + 1;
-                            }
-                        }
-                    } else {
-                        bodyZapasu = pravidlaLigi.penaltyNenatipovano || 0;
-                        zebricekMapa[em].celkemBodu += bodyZapasu;
-                        zebricekMapa[em].nenatipovaneVyhodnocene++;
-                    }
-                    zebricekMapa[em].bodyZapasuCelkem += bodyZapasu;
-                    if (zapas.kolo) {
-                        const klicKola = String(zapas.kolo).trim();
-                        if (zebricekMapa[em].bodyPoKolech[klicKola] === undefined) zebricekMapa[em].bodyPoKolech[klicKola] = 0;
-                        zebricekMapa[em].bodyPoKolech[klicKola] += bodyZapasu;
-                    }
-                }
+                let bodyZapasu = 0;
+                if (uTip) {
+                    bodyZapasu = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zapas.vysledek_domaci, zapas.vysledek_hoste, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
+                    zebricekMapa[em].celkemBodu += bodyZapasu; zebricekMapa[em].natipovaneVyhodnocene++;
+                    
+                    const tD = parseInt(uTip.tip_domaci); const tH = parseInt(uTip.tip_hoste);
+                    const rD = parseInt(zapas.vysledek_domaci); const rH = parseInt(zapas.vysledek_hoste);
+                    
+                    const jePresny = tD === rD && tH === rH && (!zapas.isPlayoff || rD !== rH || uTip.postup === zapas.postup);
+                    const jeTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
 
-                if (jeLiveNeboVyhodnoceny) {
-                    let bodyZapasuLive = 0;
-                    if (uTip) {
-                        bodyZapasuLive = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, vDomaci, vHoste, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
-                        zebricekMapa[em].celkemBoduLive += bodyZapasuLive; zebricekMapa[em].natipovaneVyhodnoceneLive++;
-                        
-                        const jePresnyLive = parseInt(uTip.tip_domaci) === parseInt(vDomaci) &&
-                                             parseInt(uTip.tip_hoste) === parseInt(vHoste) &&
-                                             (!zapas.isPlayoff || vDomaci !== vHoste || uTip.postup === zapas.postup);
-                        if (jePresnyLive) {
-                            zebricekMapa[em].presneVysledkyCountLive++;
-                            if (zapas.isTopMatch) {
-                                zebricekMapa[em].presneTopMatchesCountLive = (zebricekMapa[em].presneTopMatchesCountLive || 0) + 1;
-                            }
-                        }
-                    } else {
-                        bodyZapasuLive = pravidlaLigi.penaltyNenatipovano || 0;
-                        zebricekMapa[em].celkemBoduLive += bodyZapasuLive;
-                        zebricekMapa[em].nenatipovaneVyhodnoceneLive++;
+                    if (jePresny) {
+                        zebricekMapa[em].presneVysledkyCount++;
+                        if (zapas.isTopMatch) zebricekMapa[em].presneTopMatchesCount = (zebricekMapa[em].presneTopMatchesCount || 0) + 1;
                     }
-                    zebricekMapa[em].bodyZapasuCelkemLive += bodyZapasuLive;
-                    if (zapas.kolo) {
-                        const klicKola = String(zapas.kolo).trim();
-                        if (zebricekMapa[em].bodyPoKolechLive[klicKola] === undefined) zebricekMapa[em].bodyPoKolechLive[klicKola] = 0;
-                        zebricekMapa[em].bodyPoKolechLive[klicKola] += bodyZapasuLive;
+                    if (jeTendence) {
+                        zebricekMapa[em].spravneTendenceCount = (zebricekMapa[em].spravneTendenceCount || 0) + 1;
                     }
+                } else {
+                    bodyZapasu = pravidlaLigi.penaltyNenatipovano || 0;
+                    zebricekMapa[em].celkemBodu += bodyZapasu;
+                    zebricekMapa[em].nenatipovaneVyhodnocene++;
                 }
-            });
+                zebricekMapa[em].bodyZapasuCelkem += bodyZapasu;
+                if (zapas.kolo) {
+                    const klicKola = String(zapas.kolo).trim();
+                    if (zebricekMapa[em].bodyPoKolech[klicKola] === undefined) zebricekMapa[em].bodyPoKolech[klicKola] = 0;
+                    zebricekMapa[em].bodyPoKolech[klicKola] += bodyZapasu;
+                }
+            }
+
+            if (jeLiveNeboVyhodnoceny) {
+                let bodyZapasuLive = 0;
+                if (uTip) {
+                    bodyZapasuLive = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, vDomaci, vHoste, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
+                    zebricekMapa[em].celkemBoduLive += bodyZapasuLive; zebricekMapa[em].natipovaneVyhodnoceneLive++;
+                    
+                    const tD = parseInt(uTip.tip_domaci); const tH = parseInt(uTip.tip_hoste);
+                    const rDLive = parseInt(vDomaci); const rHLive = parseInt(vHoste);
+
+                    const jePresnyLive = tD === rDLive && tH === rHLive && (!zapas.isPlayoff || rDLive !== rHLive || uTip.postup === zapas.postup);
+                    const jeTendenceLive = (tD > tH && rDLive > rHLive) || (tD < tH && rDLive < rHLive) || (tD === tH && rDLive === rHLive);
+
+                    if (jePresnyLive) {
+                        zebricekMapa[em].presneVysledkyCountLive++;
+                        if (zapas.isTopMatch) zebricekMapa[em].presneTopMatchesCountLive = (zebricekMapa[em].presneTopMatchesCountLive || 0) + 1;
+                    }
+                    if (jeTendenceLive) {
+                        zebricekMapa[em].spravneTendenceCountLive = (zebricekMapa[em].spravneTendenceCountLive || 0) + 1;
+                    }
+                } else {
+                    bodyZapasuLive = pravidlaLigi.penaltyNenatipovano || 0;
+                    zebricekMapa[em].celkemBoduLive += bodyZapasuLive;
+                    zebricekMapa[em].nenatipovaneVyhodnoceneLive++;
+                }
+                zebricekMapa[em].bodyZapasuCelkemLive += bodyZapasuLive;
+                if (zapas.kolo) {
+                    const klicKola = String(zapas.kolo).trim();
+                    if (zebricekMapa[em].bodyPoKolechLive[klicKola] === undefined) zebricekMapa[em].bodyPoKolechLive[klicKola] = 0;
+                    zebricekMapa[em].bodyPoKolechLive[klicKola] += bodyZapasuLive;
+                }
+            }
+        });
+    });
+
+    Object.keys(zebricekMapa).forEach(em => {
+        let maxPts = 0;
+        let maxKolo = '–';
+        Object.entries(zebricekMapa[em].bodyPoKolech).forEach(([klicKola, pts]) => {
+            if (pts > maxPts) {
+                maxPts = pts;
+                maxKolo = klicKola;
+            }
+        });
+        zebricekMapa[em].nejviceBoduVKole = maxPts;
+        zebricekMapa[em].nejviceBoduVKoleNazev = maxKolo;
+    });
+
+    const perfektniKolaSeznam = [];
+
+    if (pravidlaLigi.roundBonus && pravidlaLigi.roundBonus > 0) {
+        const kolaZapasyMap = {};
+        Object.values(centralMatches).forEach(z => {
+            if (z.kolo) {
+                const k = String(z.kolo).trim();
+                if (!kolaZapasyMap[k]) kolaZapasyMap[k] = [];
+                kolaZapasyMap[k].push(z);
+            }
         });
 
+        Object.keys(kolaZapasyMap).forEach(klicKola => {
+            const zapasyVKole = kolaZapasyMap[klicKola];
+            const vsetkoDohrano = zapasyVKole.length > 0 && zapasyVKole.every(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+
+            if (vsetkoDohrano) {
+                Object.keys(RAM_USERS_PROFILES).forEach(uid => {
+                    const em = RAM_USERS_PROFILES[uid].email;
+                    if (!zebricekMapa[em]) return;
+
+                    const uSouteze = RAM_USERS_TIPS[uid] || {};
+                    const uSoutezData = uSouteze[ligaKlic] || { tipy: {} };
+                    const uTips = uSoutezData.tipy || {};
+                    let maVsechnySpravne = true;
+
+                    for (const zap of zapasyVKole) {
+                        const tip = uTips[zap.id || zap.matchId];
+                        if (!tip) { maVsechnySpravne = false; break; }
+                        const tipRozdil = parseInt(tip.tip_domaci) - parseInt(tip.tip_hoste);
+                        const realRozdil = parseInt(zap.vysledek_domaci) - parseInt(zap.vysledek_hoste);
+                        const spravna = (tipRozdil > 0 && realRozdil > 0) || (tipRozdil < 0 && realRozdil < 0) || (tipRozdil === 0 && realRozdil === 0);
+                        if (!spravna) { maVsechnySpravne = false; break; }
+                    }
+
+                    if (maVsechnySpravne) {
+                        zebricekMapa[em].celkemBodu += pravidlaLigi.roundBonus;
+                        zebricekMapa[em].celkemBoduLive += pravidlaLigi.roundBonus;
+                        if (zebricekMapa[em].bodyPoKolech[klicKola] !== undefined) zebricekMapa[em].bodyPoKolech[klicKola] += pravidlaLigi.roundBonus;
+                        if (zebricekMapa[em].bodyPoKolechLive[klicKola] !== undefined) zebricekMapa[em].bodyPoKolechLive[klicKola] += pravidlaLigi.roundBonus;
+                        
+                        perfektniKolaSeznam.push({ nickname: zebricekMapa[em].nickname, round: klicKola });
+                    }
+                });
+            }
+        });
+    }
+
+    // 👑 KRÁLOVÉ KOL: SPOČÍTÁME VÍTĚZE JEDNOTLIVÝCH DOHRANÝCH KOL
+    const vyhraVKolePocet = {};
+    const vyhraVKolePocetLive = {};
+
+    const vsechnyKolaKlice = new Set();
+    Object.keys(zebricekMapa).forEach(em => {
+        Object.keys(zebricekMapa[em].bodyPoKolech || {}).forEach(k => vsechnyKolaKlice.add(k));
+    });
+
+    vsechnyKolaKlice.forEach(klicKola => {
+        let maxPts = -Infinity;
         Object.keys(zebricekMapa).forEach(em => {
-            let maxPts = 0;
-            let maxKolo = '–';
-            Object.entries(zebricekMapa[em].bodyPoKolech).forEach(([klicKola, pts]) => {
-                if (pts > maxPts) {
-                    maxPts = pts;
-                    maxKolo = klicKola;
-                }
-            });
-            zebricekMapa[em].nejviceBoduVKole = maxPts;
-            zebricekMapa[em].nejviceBoduVKoleNazev = maxKolo;
+            const pts = zebricekMapa[em].bodyPoKolech?.[klicKola];
+            if (pts !== undefined && pts > maxPts && pts > 0) maxPts = pts;
         });
-
-        const perfektniKolaSeznam = [];
-
-        if (pravidlaLigi.roundBonus && pravidlaLigi.roundBonus > 0) {
-            const kolaZapasyMap = {};
-            Object.values(centralMatches).forEach(z => {
-                if (z.kolo) {
-                    const k = String(z.kolo).trim();
-                    if (!kolaZapasyMap[k]) kolaZapasyMap[k] = [];
-                    kolaZapasyMap[k].push(z);
-                }
-            });
-
-            Object.keys(kolaZapasyMap).forEach(klicKola => {
-                const zapasyVKole = kolaZapasyMap[klicKola];
-                const vsetkoDohrano = zapasyVKole.length > 0 && zapasyVKole.every(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
-
-                if (vsetkoDohrano) {
-                    Object.keys(RAM_USERS_PROFILES).forEach(uid => {
-                        const em = RAM_USERS_PROFILES[uid].email;
-                        if (!zebricekMapa[em]) return;
-
-                        const uSouteze = RAM_USERS_TIPS[uid] || {};
-                        const uSoutezData = uSouteze[ligaKlic] || { tipy: {} };
-                        const uTips = uSoutezData.tipy || {};
-                        let maVsechnySpravne = true;
-
-                        for (const zap of zapasyVKole) {
-                            const tip = uTips[zap.id || zap.matchId];
-                            if (!tip) { maVsechnySpravne = false; break; }
-                            const tipRozdil = parseInt(tip.tip_domaci) - parseInt(tip.tip_hoste);
-                            const realRozdil = parseInt(zap.vysledek_domaci) - parseInt(zap.vysledek_hoste);
-                            const spravna = (tipRozdil > 0 && realRozdil > 0) || (tipRozdil < 0 && realRozdil < 0) || (tipRozdil === 0 && realRozdil === 0);
-                            if (!spravna) { maVsechnySpravne = false; break; }
-                        }
-
-                        if (maVsechnySpravne) {
-                            zebricekMapa[em].celkemBodu += pravidlaLigi.roundBonus;
-                            zebricekMapa[em].celkemBoduLive += pravidlaLigi.roundBonus;
-                            if (zebricekMapa[em].bodyPoKolech[klicKola] !== undefined) zebricekMapa[em].bodyPoKolech[klicKola] += pravidlaLigi.roundBonus;
-                            if (zebricekMapa[em].bodyPoKolechLive[klicKola] !== undefined) zebricekMapa[em].bodyPoKolechLive[klicKola] += pravidlaLigi.roundBonus;
-                            
-                            perfektniKolaSeznam.push({ nickname: zebricekMapa[em].nickname, round: klicKola });
-                        }
-                    });
+        if (maxPts > 0) {
+            Object.keys(zebricekMapa).forEach(em => {
+                if (zebricekMapa[em].bodyPoKolech?.[klicKola] === maxPts) {
+                    const nick = zebricekMapa[em].nickname;
+                    vyhraVKolePocet[nick] = (vyhraVKolePocet[nick] || 0) + 1;
                 }
             });
         }
 
-        // 👑 KRÁLOVÉ KOL: SPOČÍTÁME VÍTĚZE JEDNOTLIVÝCH DOHRANÝCH KOL
-        const vyhraVKolePocet = {};
-        const vyhraVKolePocetLive = {};
-
-        const vsechnyKolaKlice = new Set();
+        let maxPtsLive = -Infinity;
         Object.keys(zebricekMapa).forEach(em => {
-            Object.keys(zebricekMapa[em].bodyPoKolech || {}).forEach(k => vsechnyKolaKlice.add(k));
+            const pts = zebricekMapa[em].bodyPoKolechLive?.[klicKola];
+            if (pts !== undefined && pts > maxPtsLive && pts > 0) maxPtsLive = pts;
         });
-
-        vsechnyKolaKlice.forEach(klicKola => {
-            let maxPts = -Infinity;
+        if (maxPtsLive > 0) {
             Object.keys(zebricekMapa).forEach(em => {
-                const pts = zebricekMapa[em].bodyPoKolech?.[klicKola];
-                if (pts !== undefined && pts > maxPts && pts > 0) maxPts = pts;
-            });
-            if (maxPts > 0) {
-                Object.keys(zebricekMapa).forEach(em => {
-                    if (zebricekMapa[em].bodyPoKolech?.[klicKola] === maxPts) {
-                        const nick = zebricekMapa[em].nickname;
-                        vyhraVKolePocet[nick] = (vyhraVKolePocet[nick] || 0) + 1;
-                    }
-                });
-            }
-
-            let maxPtsLive = -Infinity;
-            Object.keys(zebricekMapa).forEach(em => {
-                const pts = zebricekMapa[em].bodyPoKolechLive?.[klicKola];
-                if (pts !== undefined && pts > maxPtsLive && pts > 0) maxPtsLive = pts;
-            });
-            if (maxPtsLive > 0) {
-                Object.keys(zebricekMapa).forEach(em => {
-                    if (zebricekMapa[em].bodyPoKolechLive?.[klicKola] === maxPtsLive) {
-                        const nick = zebricekMapa[em].nickname;
-                        vyhraVKolePocetLive[nick] = (vyhraVKolePocetLive[nick] || 0) + 1;
-                    }
-                });
-            }
-        });
-
-        const vsechnyHraciKola = Object.keys(vyhraVKolePocet).map(nick => ({
-            nickname: nick, count: vyhraVKolePocet[nick]
-        })).filter(p => p.count > 0);
-        const unikatniHraciKolaBadges = [...new Set(vsechnyHraciKola.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-        const top3HraciKola = unikatniHraciKolaBadges.map(count => {
-            const nicks = vsechnyHraciKola.filter(p => p.count === count).map(p => p.nickname);
-            return { count, names: nicks.join(', ') };
-        });
-
-        const vsechnyHraciKolaLive = Object.keys(vyhraVKolePocetLive).map(nick => ({
-            nickname: nick, count: vyhraVKolePocetLive[nick]
-        })).filter(p => p.count > 0);
-        const unikatniHraciKolaBadgesLive = [...new Set(vsechnyHraciKolaLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-        const top3HraciKolaLive = unikatniHraciKolaBadgesLive.map(count => {
-            const nicks = vsechnyHraciKolaLive.filter(p => p.count === count).map(p => p.nickname);
-            return { count, names: nicks.join(', ') };
-        });
-
-        const vsechnyPresne = Object.keys(zebricekMapa).map(email => ({
-            nickname: zebricekMapa[email].nickname,
-            count: zebricekMapa[email].presneVysledkyCount
-        })).filter(p => p.count > 0);
-        const unikatniPresneBadges = [...new Set(vsechnyPresne.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-        const top3Presne = unikatniPresneBadges.map(count => {
-            const nicks = vsechnyPresne.filter(p => p.count === count).map(p => p.nickname);
-            return { count, names: nicks.join(', ') };
-        });
-
-        // 🔥 NEJVÍC PŘESNÝCH TOP ZÁPASŮ (OFICIÁLNÍ)
-        const vsechnyPresneTop = Object.keys(zebricekMapa).map(email => ({
-            nickname: zebricekMapa[email].nickname,
-            count: zebricekMapa[email].presneTopMatchesCount || 0
-        })).filter(p => p.count > 0);
-        const unikatniPresneTopBadges = [...new Set(vsechnyPresneTop.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-        const top3PresneTop = unikatniPresneTopBadges.map(count => {
-            const nicks = vsechnyPresneTop.filter(p => p.count === count).map(p => p.nickname);
-            return { count, names: nicks.join(', ') };
-        });
-
-        const vsechnyKolaZisky = [];
-        Object.keys(zebricekMapa).forEach(em => {
-            const nickname = zebricekMapa[em].nickname;
-            Object.keys(zebricekMapa[em].bodyPoKolech).forEach(klicKola => {
-                const pts = zebricekMapa[em].bodyPoKolech[klicKola];
-                if (pts > 0) {
-                    vsechnyKolaZisky.push({ nickname, points: pts, round: klicKola });
+                if (zebricekMapa[em].bodyPoKolechLive?.[klicKola] === maxPtsLive) {
+                    const nick = zebricekMapa[em].nickname;
+                    vyhraVKolePocetLive[nick] = (vyhraVKolePocetLive[nick] || 0) + 1;
                 }
             });
-        });
-        const unikatniKolaZisky = [...new Set(vsechnyKolaZisky.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
-        const top3Kola = unikatniKolaZisky.map(points => {
-            const entries = vsechnyKolaZisky.filter(p => p.points === points);
-            const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
-            return { points, text: formattedArr.join(', ') };
-        });
+        }
+    });
 
-        const vsechnyPresneLive = Object.keys(zebricekMapa).map(email => ({
-            nickname: zebricekMapa[email].nickname,
-            count: zebricekMapa[email].presneVysledkyCountLive
-        })).filter(p => p.count > 0);
-        const unikatniPresneBadgesLive = [...new Set(vsechnyPresneLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-        const top3PresneLive = unikatniPresneBadgesLive.map(count => {
-            const nicks = vsechnyPresneLive.filter(p => p.count === count).map(p => p.nickname);
-            return { count, names: nicks.join(', ') };
-        });
+    const vsechnyHraciKola = Object.keys(vyhraVKolePocet).map(nick => ({
+        nickname: nick, count: vyhraVKolePocet[nick]
+    })).filter(p => p.count > 0);
+    const unikatniHraciKolaBadges = [...new Set(vsechnyHraciKola.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3HraciKola = unikatniHraciKolaBadges.map(count => {
+        const nicks = vsechnyHraciKola.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
 
-        // 🔥 NEJVÍC PŘESNÝCH TOP ZÁPASŮ (LIVE)
-        const vsechnyPresneTopLive = Object.keys(zebricekMapa).map(email => ({
-            nickname: zebricekMapa[email].nickname,
-            count: zebricekMapa[email].presneTopMatchesCountLive || 0
-        })).filter(p => p.count > 0);
-        const unikatniPresneTopBadgesLive = [...new Set(vsechnyPresneTopLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-        const top3PresneTopLive = unikatniPresneTopBadgesLive.map(count => {
-            const nicks = vsechnyPresneTopLive.filter(p => p.count === count).map(p => p.nickname);
-            return { count, names: nicks.join(', ') };
-        });
+    const vsechnyHraciKolaLive = Object.keys(vyhraVKolePocetLive).map(nick => ({
+        nickname: nick, count: vyhraVKolePocetLive[nick]
+    })).filter(p => p.count > 0);
+    const unikatniHraciKolaBadgesLive = [...new Set(vsechnyHraciKolaLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3HraciKolaLive = unikatniHraciKolaBadgesLive.map(count => {
+        const nicks = vsechnyHraciKolaLive.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
 
-        const vsechnyKolaZiskyLive = [];
-        Object.keys(zebricekMapa).forEach(em => {
-            const nickname = zebricekMapa[em].nickname;
-            Object.keys(zebricekMapa[em].bodyPoKolechLive).forEach(klicKola => {
-                const pts = zebricekMapa[em].bodyPoKolechLive[klicKola];
-                if (pts > 0) {
-                    vsechnyKolaZiskyLive.push({ nickname, points: pts, round: klicKola });
-                }
-            });
-        });
-        const unikatniKolaZiskyLive = [...new Set(vsechnyKolaZiskyLive.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
-        const top3KolaLive = unikatniKolaZiskyLive.map(points => {
-            const entries = vsechnyKolaZiskyLive.filter(p => p.points === points);
-            const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
-            return { points, text: formattedArr.join(', ') };
-        });
+    const vsechnyPresne = Object.keys(zebricekMapa).map(email => ({
+        nickname: zebricekMapa[email].nickname,
+        count: zebricekMapa[email].presneVysledkyCount
+    })).filter(p => p.count > 0);
+    const unikatniPresneBadges = [...new Set(vsechnyPresne.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3Presne = unikatniPresneBadges.map(count => {
+        const nicks = vsechnyPresne.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
 
-        const vsechnyAktualniKolo = Object.keys(zebricekMapa).map(em => {
-            const stats = zebricekMapa[em];
-            const pts = stats.bodyPoKolechLive?.[aktivniKolo] !== undefined ? stats.bodyPoKolechLive[aktivniKolo] : (stats.bodyPoKolech[aktivniKolo] || 0);
-            return { nickname: stats.nickname, points: pts };
-        }).filter(p => p.points > 0);
-        const unikatniAktualniZisky = [...new Set(vsechnyAktualniKolo.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
-        const top3AktualniKolo = unikatniAktualniZisky.map(points => {
-            const nicks = vsechnyAktualniKolo.filter(p => p.points === points).map(p => p.nickname);
-            return { points, names: nicks.join(', ') };
-        });
+    // 🔥 NEJVÍC PŘESNÝCH TOP ZÁPASŮ (OFICIÁLNÍ)
+    const vsechnyPresneTop = Object.keys(zebricekMapa).map(email => ({
+        nickname: zebricekMapa[email].nickname,
+        count: zebricekMapa[email].presneTopMatchesCount || 0
+    })).filter(p => p.count > 0);
+    const unikatniPresneTopBadges = [...new Set(vsechnyPresneTop.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3PresneTop = unikatniPresneTopBadges.map(count => {
+        const nicks = vsechnyPresneTop.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
 
-        const zebricekPole = Object.keys(zebricekMapa).map(em => ({
-            uid: zebricekMapa[em].uid, email: em, nickname: zebricekMapa[em].nickname,
-            celkemBodu: zebricekMapa[em].celkemBodu, natipovaneVyhodnocene: zebricekMapa[em].natipovaneVyhodnocene,
-            nenatipovaneVyhodnocene: zebricekMapa[em].nenatipovaneVyhodnocene, presneVysledkyCount: zebricekMapa[em].presneVysledkyCount,
-            nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[em].nejviceBoduVKoleNazev || '–',
-            vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
-            bodyKoloAktualni: zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0,
-            efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[em].bodyZapasuCelkem / maxMoznychBoduZapasu) * 100 : 0
-        })).sort((a, b) => {
-            if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
-            return b.presneVysledkyCount - a.presneVysledkyCount;
-        });
-
-        const zebricekLivePole = Object.keys(zebricekMapa).map(em => ({
-            uid: zebricekMapa[em].uid, email: em, nickname: zebricekMapa[em].nickname,
-            celkemBodu: zebricekMapa[em].celkemBoduLive, natipovaneVyhodnocene: zebricekMapa[em].natipovaneVyhodnoceneLive,
-            nenatipovaneVyhodnocene: zebricekMapa[em].nenatipovaneVyhodnoceneLive, presneVysledkyCount: zebricekMapa[em].presneVysledkyCountLive,
-            nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[em].nejviceBoduVKoleNazev || '–',
-            vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
-            bodyKoloAktualni: zebricekMapa[em].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[em].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0),
-            efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[em].bodyZapasuCelkemLive / maxMoznychBoduZapasu) * 100 : 0
-        })).sort((a, b) => {
-            if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
-            return b.presneVysledkyCount - a.presneVysledkyCount;
-        });
-
-        zebricekLivePole.forEach(p => {
-            const em = p.email;
-            if (zebricekMapa[em] && zebricekMapa[em].bodyPoKolechLive) {
-                p.bodyKoloAktualni = zebricekMapa[em].bodyPoKolechLive[aktivniKolo] !== undefined ? zebricekMapa[em].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0);
+    const vsechnyKolaZisky = [];
+    Object.keys(zebricekMapa).forEach(em => {
+        const nickname = zebricekMapa[em].nickname;
+        Object.keys(zebricekMapa[em].bodyPoKolech).forEach(klicKola => {
+            const pts = zebricekMapa[em].bodyPoKolech[klicKola];
+            if (pts > 0) {
+                vsechnyKolaZisky.push({ nickname, points: pts, round: klicKola });
             }
         });
+    });
+    const unikatniKolaZisky = [...new Set(vsechnyKolaZisky.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+    const top3Kola = unikatniKolaZisky.map(points => {
+        const entries = vsechnyKolaZisky.filter(p => p.points === points);
+        const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
+        return { points, text: formattedArr.join(', ') };
+    });
 
-        zebricekLivePole.forEach((pLive, idxLive) => {
-            const idxOfficial = zebricekPole.findIndex(pOff => pOff.uid === pLive.uid);
-            pLive.poziceDelta = idxOfficial !== -1 ? (idxOfficial - idxLive) : 0;
+    const vsechnyPresneLive = Object.keys(zebricekMapa).map(email => ({
+        nickname: zebricekMapa[email].nickname,
+        count: zebricekMapa[email].presneVysledkyCountLive
+    })).filter(p => p.count > 0);
+    const unikatniPresneBadgesLive = [...new Set(vsechnyPresneLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3PresneLive = unikatniPresneBadgesLive.map(count => {
+        const nicks = vsechnyPresneLive.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
+
+    // 🔥 NEJVÍC PŘESNÝCH TOP ZÁPASŮ (LIVE)
+    const vsechnyPresneTopLive = Object.keys(zebricekMapa).map(email => ({
+        nickname: zebricekMapa[email].nickname,
+        count: zebricekMapa[email].presneTopMatchesCountLive || 0
+    })).filter(p => p.count > 0);
+    const unikatniPresneTopBadgesLive = [...new Set(vsechnyPresneTopLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const top3PresneTopLive = unikatniPresneTopBadgesLive.map(count => {
+        const nicks = vsechnyPresneTopLive.filter(p => p.count === count).map(p => p.nickname);
+        return { count, names: nicks.join(', ') };
+    });
+
+    const vsechnyKolaZiskyLive = [];
+    Object.keys(zebricekMapa).forEach(em => {
+        const nickname = zebricekMapa[em].nickname;
+        Object.keys(zebricekMapa[em].bodyPoKolechLive).forEach(klicKola => {
+            const pts = zebricekMapa[em].bodyPoKolechLive[klicKola];
+            if (pts > 0) {
+                vsechnyKolaZiskyLive.push({ nickname, points: pts, round: klicKola });
+            }
         });
+    });
+    const unikatniKolaZiskyLive = [...new Set(vsechnyKolaZiskyLive.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+    const top3KolaLive = unikatniKolaZiskyLive.map(points => {
+        const entries = vsechnyKolaZiskyLive.filter(p => p.points === points);
+        const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
+        return { points, text: formattedArr.join(', ') };
+    });
 
-        const liveMatchIds = Object.keys(centralMatches).filter(id => {
-            const z = centralMatches[id];
-            return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED";
-        });
+    const vsechnyAktualniKolo = Object.keys(zebricekMapa).map(em => {
+        const stats = zebricekMapa[em];
+        const pts = stats.bodyPoKolechLive?.[aktivniKolo] !== undefined ? stats.bodyPoKolechLive[aktivniKolo] : (stats.bodyPoKolech[aktivniKolo] || 0);
+        return { nickname: stats.nickname, points: pts };
+    }).filter(p => p.points > 0);
+    const unikatniAktualniZisky = [...new Set(vsechnyAktualniKolo.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+    const top3AktualniKolo = unikatniAktualniZisky.map(points => {
+        const nicks = vsechnyAktualniKolo.filter(p => p.points === points).map(p => p.nickname);
+        return { points, names: nicks.join(', ') };
+    });
 
-        const timestampNow = new Date().toISOString();
+    const zebricekPole = Object.keys(zebricekMapa).map(em => ({
+        uid: zebricekMapa[em].uid, email: em, nickname: zebricekMapa[em].nickname,
+        celkemBodu: zebricekMapa[em].celkemBodu, natipovaneVyhodnocene: zebricekMapa[em].natipovaneVyhodnocene,
+        nenatipovaneVyhodnocene: zebricekMapa[em].nenatipovaneVyhodnocene, presneVysledkyCount: zebricekMapa[em].presneVysledkyCount,
+        presneTopMatchesCount: zebricekMapa[em].presneTopMatchesCount || 0,
+        spravneTendenceCount: zebricekMapa[em].spravneTendenceCount || 0,
+        vyhranaKolaCount: vyhraVKolePocet[zebricekMapa[em].nickname] || 0,
+        perfektniKolaCount: (perfektniKolaSeznam.filter(pk => pk.nickname === zebricekMapa[em].nickname) || []).length,
+        nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[em].nejviceBoduVKoleNazev || '–',
+        vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
+        bodyKoloAktualni: zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0,
+        efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[em].bodyZapasuCelkem / maxMoznychBoduZapasu) * 100 : 0
+    })).sort((a, b) => {
+        if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
+        return b.presneVysledkyCount - a.presneVysledkyCount;
+    });
 
-        const leaderboardJson = {
-            zebricek: zebricekPole, 
-            zebricekLive: zebricekLivePole, 
-            isLive: liveMatchIds.length > 0, 
-            mapaPrezdivek: mapaPrezdivek,
-            top3Presne: top3Presne,
-            top3PresneTop: top3PresneTop,
-            top3HraciKola: top3HraciKola,
-            top3HraciKolaLive: top3HraciKolaLive,
-            perfektniKola: perfektniKolaSeznam,
-            top3Kola: top3Kola,
-            top3PresneLive: top3PresneLive,
-            top3PresneTopLive: top3PresneTopLive,
-            top3KolaLive: top3KolaLive,
-            top3AktualniKolo: top3AktualniKolo,
-            aktivniKoloText: aktivniKolo,
-            aktualizovano: timestampNow
-        };
+    const zebricekLivePole = Object.keys(zebricekMapa).map(em => ({
+        uid: zebricekMapa[em].uid, email: em, nickname: zebricekMapa[em].nickname,
+        celkemBodu: zebricekMapa[em].celkemBoduLive, natipovaneVyhodnocene: zebricekMapa[em].natipovaneVyhodnoceneLive,
+        nenatipovaneVyhodnocene: zebricekMapa[em].nenatipovaneVyhodnoceneLive, presneVysledkyCount: zebricekMapa[em].presneVysledkyCountLive,
+        presneTopMatchesCount: zebricekMapa[em].presneTopMatchesCountLive || zebricekMapa[em].presneTopMatchesCount || 0,
+        spravneTendenceCount: zebricekMapa[em].spravneTendenceCountLive || zebricekMapa[em].spravneTendenceCount || 0,
+        vyhranaKolaCount: vyhraVKolePocetLive[zebricekMapa[em].nickname] || vyhraVKolePocet[zebricekMapa[em].nickname] || 0,
+        perfektniKolaCount: (perfektniKolaSeznam.filter(pk => pk.nickname === zebricekMapa[em].nickname) || []).length,
+        nejviceBoduVKole: zebricekMapa[em].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[em].nejviceBoduVKoleNazev || '–',
+        vitezMs: zebricekMapa[em].vitezMs, nejStrelec: zebricekMapa[em].nejStrelec,
+        bodyKoloAktualni: zebricekMapa[em].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[em].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0),
+        efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[em].bodyZapasuCelkemLive / maxMoznychBoduZapasu) * 100 : 0
+    })).sort((a, b) => {
+        if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
+        return b.presneVysledkyCount - a.presneVysledkyCount;
+    });
+
+    zebricekLivePole.forEach(p => {
+        const em = p.email;
+        if (zebricekMapa[em] && zebricekMapa[em].bodyPoKolechLive) {
+            p.bodyKoloAktualni = zebricekMapa[em].bodyPoKolechLive[aktivniKolo] !== undefined ? zebricekMapa[em].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[em].bodyPoKolech[aktivniKolo] || 0);
+        }
+    });
+
+    zebricekLivePole.forEach((pLive, idxLive) => {
+        const idxOfficial = zebricekPole.findIndex(pOff => pOff.uid === pLive.uid);
+        pLive.poziceDelta = idxOfficial !== -1 ? (idxOfficial - idxLive) : 0;
+    });
+
+    const liveMatchIds = Object.keys(centralMatches).filter(id => {
+        const z = centralMatches[id];
+        return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED";
+    });
+
+    const timestampNow = new Date().toISOString();
+
+    const leaderboardJson = {
+        zebricek: zebricekPole, 
+        zebricekLive: zebricekLivePole, 
+        isLive: liveMatchIds.length > 0, 
+        mapaPrezdivek: mapaPrezdivek,
+        top3Presne: top3Presne,
+        top3PresneTop: top3PresneTop,
+        top3HraciKola: top3HraciKola,
+        top3HraciKolaLive: top3HraciKolaLive,
+        perfektniKola: perfektniKolaSeznam,
+        top3Kola: top3Kola,
+        top3PresneLive: top3PresneLive,
+        top3PresneTopLive: top3PresneTopLive,
+        top3KolaLive: top3KolaLive,
+        top3AktualniKolo: top3AktualniKolo,
+        aktivniKoloText: aktivniKolo,
+        aktualizovano: timestampNow
+    };
 
         await uploadToR2(leagueName, "leaderboard.json", leaderboardJson);
 
