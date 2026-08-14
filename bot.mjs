@@ -1823,3 +1823,142 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
 
     await uploadToR2(leagueName, "cup.json", cupJson);
 }
+
+// =========================================================================
+// 🌳 PLAY-OFF ENGINE: SEEDING, DVOUZÁPASY (18.–25. KOLO) A FINÁLE (26. KOLO)
+// =========================================================================
+
+// 🥊 POMOCNÝ VÝPOČET TIE-BREAKERU MEZI DVĚMA HRÁČI PŘI ROVNOSTI BODŮ
+function vyhodnotVitezePlayoffDuelu(p1, p2) {
+    if (p1.totalPts > p2.totalPts) return p1.uid;
+    if (p2.totalPts > p1.totalPts) return p2.uid;
+
+    // 1. Tie-break: Součet přesných výsledků
+    if (p1.totalExact > p2.totalExact) return p1.uid;
+    if (p2.totalExact > p1.totalExact) return p2.uid;
+
+    // 2. Tie-break: Součet přesných TOP zápasů
+    if (p1.totalTopExact > p2.totalTopExact) return p1.uid;
+    if (p2.totalTopExact > p1.totalTopExact) return p2.uid;
+
+    // 3. Tie-break: Součet tendencí
+    if (p1.totalTend > p2.totalTend) return p1.uid;
+    if (p2.totalTend > p1.totalTend) return p2.uid;
+
+    // 4. Tie-break: Původní lepší nasazení (nižší seed)
+    return p1.seed <= p2.seed ? p1.uid : p2.uid;
+}
+
+// 🧮 VÝPOČETNÍ MODUL PLAY-OFF PRO KOLA 18 AŽ 26
+function sestavPlayoffPavouka(leagueName, finalGroups, secondPlacesRank, matchesList) {
+    // 1. Zjistíme, zda už skončilo 17. kolo (konec skupin)
+    const r17Matches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === 17);
+    const r17Finished = r17Matches.length > 0 && r17Matches.every(z => z.vysledek_domaci !== undefined && z.apiStatus !== 'IN_PLAY');
+
+    if (!r17Finished) return null; // Play-off se sestavuje až po 17. kole
+
+    // 2. Generální nasazení 1 až 26
+    const top4Winners = ['A', 'B', 'C', 'D'].map(k => finalGroups[k]?.[0]).filter(Boolean);
+    top4Winners.sort((a, b) => b.pts - a.pts || b.exact - a.exact || a.seed - b.seed);
+
+    const top2Seconds = secondPlacesRank.filter(sp => sp.qualifiedToTop6);
+    const other2Seconds = secondPlacesRank.filter(sp => !sp.qualifiedToTop6);
+
+    const restOfPlayers = [];
+    ['A', 'B', 'C', 'D'].forEach(k => {
+        const grp = finalGroups[k] || [];
+        for (let i = 2; i < grp.length; i++) {
+            restOfPlayers.push(grp[i]);
+        }
+    });
+    restOfPlayers.push(...other2Seconds);
+    restOfPlayers.sort((a, b) => b.pts - a.pts || b.exact - a.exact || a.seed - b.seed);
+
+    // Finální žebříček nasazení 1.–26.
+    const fullSeeding = [
+        ...top4Winners.map((p, i) => ({ ...p, generalSeed: i + 1 })),
+        ...top2Seconds.map((p, i) => ({ ...p, generalSeed: i + 5 })),
+        ...restOfPlayers.map((p, i) => ({ ...p, generalSeed: i + 7 }))
+    ];
+
+    // Pomocná funkce pro vytažení bodů hráče v daném ligovém kole
+    const getPlayerRoundStats = (uid, roundNum) => {
+        const uSouteze = RAM_USERS_TIPS[uid] || {};
+        const ligaKlic = String(leagueName).replace(/ /g, '_');
+        const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
+
+        const roundMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === roundNum);
+        let pts = 0, exact = 0, topExact = 0, tend = 0;
+        let isStarted = false;
+
+        roundMatches.forEach(zap => {
+            if (zap.vysledek_domaci !== undefined) {
+                isStarted = true;
+                const tip = uTips[zap.id || zap.matchId];
+                if (tip) {
+                    pts += vypocitejBodyZapasuLocal(tip.tip_domaci, tip.tip_hoste, zap.vysledek_domaci, zap.vysledek_hoste, tip.postup, zap.postup, zap.isPlayoff, zap.isTopMatch, leagueName);
+                    const td = parseInt(tip.tip_domaci); const th = parseInt(tip.tip_hoste);
+                    const rd = parseInt(zap.vysledek_domaci); const rh = parseInt(zap.vysledek_hoste);
+                    if (td === rd && th === rh) {
+                        exact++;
+                        if (zap.isTopMatch) topExact++;
+                    }
+                    if ((td > th && rd > rh) || (td < th && rd < rh) || (td === th && rd === rh)) {
+                        tend++;
+                    }
+                }
+            }
+        });
+
+        return { pts, exact, topExact, tend, isStarted };
+    };
+
+    // 3. Sestavení 10 duelů Předkola (18. & 19. kolo – 7. vs 26., 8. vs 25., ...)
+    const preRoundDuels = [];
+    for (let i = 0; i < 10; i++) {
+        const p1Seed = fullSeeding[6 + i]; // Seed 7..16
+        const p2Seed = fullSeeding[25 - i]; // Seed 26..17
+
+        const p1L1 = getPlayerRoundStats(p1Seed?.uid, 18);
+        const p1L2 = getPlayerRoundStats(p1Seed?.uid, 19);
+        const p2L1 = getPlayerRoundStats(p2Seed?.uid, 18);
+        const p2L2 = getPlayerRoundStats(p2Seed?.uid, 19);
+
+        const p1Obj = {
+            uid: p1Seed?.uid, nick: p1Seed?.nick, seed: p1Seed?.generalSeed,
+            leg1: p1L1.isStarted ? p1L1.pts : null, leg2: p1L2.isStarted ? p1L2.pts : null,
+            totalPts: (p1L1.pts || 0) + (p1L2.pts || 0),
+            totalExact: p1L1.exact + p1L2.exact, totalTopExact: p1L1.topExact + p1L2.topExact, totalTend: p1L1.tend + p1L2.tend
+        };
+
+        const p2Obj = {
+            uid: p2Seed?.uid, nick: p2Seed?.nick, seed: p2Seed?.generalSeed,
+            leg1: p2L1.isStarted ? p2L1.pts : null, leg2: p2L2.isStarted ? p2L2.pts : null,
+            totalPts: (p2L1.pts || 0) + (p2L2.pts || 0),
+            totalExact: p2L1.exact + p2L2.exact, totalTopExact: p2L1.topExact + p2L2.topExact, totalTend: p2L1.tend + p2L2.tend
+        };
+
+        const isFinished = p1L2.isStarted && p2L2.isStarted;
+        const winnerUid = isFinished ? vyhodnotVitezePlayoffDuelu(p1Obj, p2Obj) : null;
+
+        preRoundDuels.push({
+            duelId: `PR_${i + 1}`,
+            title: `Předkolo ${i + 1}`,
+            statusText: isFinished ? 'DOHRÁNO ✓' : (p1L1.isStarted ? 'ODVETA ⏳' : 'ČEKÁ NA VÝKOP'),
+            p1: p1Obj,
+            p2: p2Obj,
+            winnerUid: winnerUid
+        });
+    }
+
+    return {
+        rounds: [
+            {
+                name: "🥊 PŘEDKOLO (18. & 19. KOLO)",
+                info: "Dvouzápasový souboj (Doma / Odveta)",
+                isSingleMatch: false,
+                duels: preRoundDuels
+            }
+        ]
+    };
+}
