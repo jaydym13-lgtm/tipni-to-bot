@@ -1397,9 +1397,20 @@ async function providniApiHeartbeat() {
                             }
                             const parsedDate = new Date(rawStr);
                             if (!isNaN(parsedDate.getTime())) {
-                                const czTime = new Date(parsedDate.toLocaleString("en-US", { timeZone: "Europe/Prague" }));
-                                const utcTime = new Date(parsedDate.toLocaleString("en-US", { timeZone: "UTC" }));
-                                const diffHours = Math.round((czTime - utcTime) / (1000 * 60 * 60));
+                                // 🛡️ DETERMINISTICKÝ PŘEPOČET ČASOVÉHO PÁSMA PRAHY (Bezpečné pro zimní i letní čas CET/CEST)
+                                const pragueFormatter = new Intl.DateTimeFormat('en-US', {
+                                    timeZone: 'Europe/Prague',
+                                    year: 'numeric', month: 'numeric', day: 'numeric',
+                                    hour: 'numeric', minute: 'numeric', second: 'numeric',
+                                    hour12: false
+                                });
+                                const pParts = {};
+                                pragueFormatter.formatToParts(parsedDate).forEach(({ type, value }) => {
+                                    pParts[type] = parseInt(value, 10);
+                                });
+                                if (pParts.hour === 24) pParts.hour = 0;
+                                const pragueUtcMs = Date.UTC(pParts.year, pParts.month - 1, pParts.day, pParts.hour, pParts.minute, pParts.second);
+                                const diffHours = Math.round((pragueUtcMs - parsedDate.getTime()) / (1000 * 60 * 60));
 
                                 parsedDate.setHours(parsedDate.getHours() + diffHours);
                                 matchIsoDate = parsedDate.toISOString();
