@@ -1272,18 +1272,16 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             }
         }
 
-        if (forceWriteHistory) {
-            try {
-                const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
-                await pulsRef.set({
-                    verzeRozpisu: admin.firestore.FieldValue.increment(1),
-                    verzeZebricku: admin.firestore.FieldValue.increment(1),
-                    aktualizovano: admin.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-                console.log(`📡 PULS SYNC [${leagueName}]: Firestore puls aktualizován.`);
-            } catch (pulsErr) {
-                console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
-            }
+        try {
+            const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
+            await pulsRef.set({
+                verzeRozpisu: admin.firestore.FieldValue.increment(1),
+                verzeZebricku: admin.firestore.FieldValue.increment(1),
+                aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log(`📡 PULS SYNC [${leagueName}]: Firestore puls aktualizován.`);
+        } catch (pulsErr) {
+            console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
         }
 }
 
