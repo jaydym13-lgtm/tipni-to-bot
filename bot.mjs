@@ -1512,6 +1512,7 @@ async function providniApiHeartbeat() {
                             const uTip = uTips[apiId];
                             if (uTip && uTip.tip_domaci !== undefined) {
                                 tipyProZapasPole.push({
+                                    uid: uid,
                                     userEmail: p.email,
                                     nickname: p.nickname,
                                     tip_domaci: parseInt(uTip.tip_domaci),
