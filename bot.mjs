@@ -1687,13 +1687,10 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
         z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED"
     );
 
-    // Načteme trvalý stav zámku z Firestore
-    const cupLockRef = db.collection("ligy").doc(leagueName)
-        .collection("sezony").doc(SEZONA_ID)
-        .collection("stav").doc("cup_lock");
-    
-    let cupLockSnap = await cupLockRef.get().catch(() => null);
-    let lockedData = (cupLockSnap && cupLockSnap.exists) ? cupLockSnap.data() : null;
+    // Načteme trvalý stav zámku z dokumentu ligy
+    const leagueDocSnap = await db.collection("ligy").doc(leagueName).get().catch(() => null);
+    const lData = leagueDocSnap && leagueDocSnap.exists ? leagueDocSnap.data() : {};
+    let lockedData = lData.cupLock || null;
 
     // 🔒 AUTOMATICKÝ ZÁMEK PO 10. KOLE
     if (r10Finished && !lockedData && zebricekPole.length > 0) {
@@ -1705,7 +1702,7 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
             lockedAt: new Date().toISOString(),
             initialGroups: lockedDraft
         };
-        await cupLockRef.set(lockedData, { merge: true }).catch(e => console.error("❌ Chyba zápisu cup_lock:", e));
+        await db.collection("ligy").doc(leagueName).set({ cupLock: lockedData }, { merge: true }).catch(e => console.error("❌ Chyba zápisu cup_lock:", e));
     }
 
     const isGroupsLocked = Boolean(lockedData && lockedData.initialGroups);
