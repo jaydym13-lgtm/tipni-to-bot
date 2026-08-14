@@ -1234,6 +1234,9 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
 
         await uploadToR2(leagueName, "leaderboard.json", leaderboardJson);
 
+        // 🏆 SPOUŠTĚČ POHÁROVÉHO ENGINU (FÁZE 3): Výpočet a distribuce cup.json
+        await rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches);
+
     const pocetZapasu = Object.keys(centralMatches).length;
     const hasMatches = pocetZapasu > 0;
 
@@ -1643,3 +1646,180 @@ async function startEnterpriseApplication() {
 }
 
 startEnterpriseApplication();
+
+// =========================================================================
+// 🏆 POHÁROVÝ ENGINE: ZPRACOVÁNÍ SKUPIN, ZÁMKU A 2. MÍST (FÁZE 3)
+// =========================================================================
+
+// 🐍 HADÍ ALGORITMUS PRO ROZDĚLENÍ 26 HRÁČŮ DO SKUPIN (A, B, C, D)
+function vypocitejHadíRozdeleni(sortedPlayers) {
+    const groups = { A: [], B: [], C: [], D: [] };
+    const groupKeys = ["A", "B", "C", "D"];
+    if (!Array.isArray(sortedPlayers)) return groups;
+
+    sortedPlayers.forEach((p, index) => {
+        const round = Math.floor(index / 4);
+        const pos = index % 4;
+        const grpIdx = (round % 2 === 0) ? pos : (3 - pos);
+        groups[groupKeys[grpIdx]].push({
+            uid: p.uid,
+            nick: p.nickname || p.nick || "Anonym",
+            seed: index + 1,
+            pts: p.celkemBodu || 0
+        });
+    });
+    return groups;
+}
+
+// 🧮 VÝPOČETNÍ MOZEK POHÁRU: SKUPINY (11.–17. KOLO) + SOUBOJ 2. MÍST
+async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches) {
+    if (leagueName !== "Chance Liga" && leagueName !== "Premier League") return;
+
+    const ligaKlic = String(leagueName).replace(/ /g, "_");
+    const matchesList = Object.values(centralMatches || {});
+
+    // 1. Zjistíme, zda už proběhlo a je dohráno kompletní 10. kolo (Zámek)
+    const r10Matches = matchesList.filter(z => {
+        const k = String(z.kolo || "").trim().toLowerCase();
+        return k === "10. kolo" || k === "10";
+    });
+    const r10Finished = r10Matches.length > 0 && r10Matches.every(z => 
+        z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED"
+    );
+
+    // Načteme trvalý stav zámku z Firestore
+    const cupLockRef = db.collection("ligy").doc(leagueName)
+        .collection("sezony").doc(SEZONA_ID)
+        .collection("stav").doc("cup_lock");
+    
+    let cupLockSnap = await cupLockRef.get().catch(() => null);
+    let lockedData = (cupLockSnap && cupLockSnap.exists) ? cupLockSnap.data() : null;
+
+    // 🔒 AUTOMATICKÝ ZÁMEK PO 10. KOLE
+    if (r10Finished && !lockedData && zebricekPole.length > 0) {
+        console.log(`🔒 CUP LOCK TRIGGER [${leagueName}]: 10. kolo oficiálně dohráno! Zamykám složení skupin Poháru.`);
+        const lockedDraft = vypocitejHadíRozdeleni(zebricekPole);
+        lockedData = {
+            status: "GROUPS_LOCKED",
+            lockedAtRound: 10,
+            lockedAt: new Date().toISOString(),
+            initialGroups: lockedDraft
+        };
+        await cupLockRef.set(lockedData, { merge: true }).catch(e => console.error("❌ Chyba zápisu cup_lock:", e));
+    }
+
+    const isGroupsLocked = Boolean(lockedData && lockedData.initialGroups);
+    const status = isGroupsLocked ? "GROUPS_LOCKED" : "PREVIEW";
+
+    // 2. Sestavení skupin a výpočet bodů
+    const groupsDraft = isGroupsLocked ? lockedData.initialGroups : vypocitejHadíRozdeleni(zebricekPole);
+    const finalGroups = { A: [], B: [], C: [], D: [] };
+
+    // Zápasy patřící do základních skupin (11. až 17. kolo)
+    const groupStageMatches = matchesList.filter(z => {
+        const kNum = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""));
+        return kNum >= 11 && kNum <= 17;
+    });
+
+    for (const grpKey of ["A", "B", "C", "D"]) {
+        const members = groupsDraft[grpKey] || [];
+        
+        finalGroups[grpKey] = members.map(m => {
+            let pts = 0;
+            let exact = 0;
+            let topExact = 0;
+            let tend = 0;
+
+            if (isGroupsLocked && groupStageMatches.length > 0) {
+                const uSouteze = RAM_USERS_TIPS[m.uid] || {};
+                const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
+
+                groupStageMatches.forEach(zap => {
+                    const isEvaluated = zap.vysledek_domaci !== undefined && zap.vysledek_domaci !== null;
+                    if (!isEvaluated) return;
+
+                    const uTip = uTips[zap.id || zap.matchId];
+                    if (uTip) {
+                        const b = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zap.vysledek_domaci, zap.vysledek_hoste, uTip.postup, zap.postup, zap.isPlayoff, zap.isTopMatch, leagueName);
+                        pts += b;
+
+                        const tD = parseInt(uTip.tip_domaci); const tH = parseInt(uTip.tip_hoste);
+                        const rD = parseInt(zap.vysledek_domaci); const rH = parseInt(zap.vysledek_hoste);
+                        if (tD === rD && tH === rH) {
+                            exact++;
+                            if (zap.isTopMatch) topExact++;
+                        }
+                        if ((tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH)) {
+                            tend++;
+                        }
+                    }
+                });
+            } else {
+                // V preview módu promítáme aktuální celkové body z ligy
+                const pOff = zebricekPole.find(p => p.uid === m.uid);
+                pts = pOff ? pOff.celkemBodu : (m.pts || 0);
+            }
+
+            return {
+                uid: m.uid,
+                nick: m.nick || m.nickname,
+                seed: m.seed || m.originalRank || 1,
+                pts: pts,
+                exact: exact,
+                topExact: topExact,
+                tend: tend
+            };
+        });
+
+        // Seřazení hráčů ve skupině
+        finalGroups[grpKey].sort((a, b) => {
+            if (isGroupsLocked) {
+                if (b.pts !== a.pts) return b.pts - a.pts;
+                if (b.exact !== a.exact) return b.exact - a.exact;
+                if (b.topExact !== a.topExact) return b.topExact - a.topExact;
+                if (b.tend !== a.tend) return b.tend - a.tend;
+                return a.seed - b.seed;
+            }
+            return a.seed - b.seed;
+        });
+    }
+
+    // 3. Sestavení Mini-tabulky 2. míst (Boj o přímý postup do TOP 6)
+    let secondPlacesRank = [];
+    if (isGroupsLocked) {
+        ["A", "B", "C", "D"].forEach(grpKey => {
+            const grp = finalGroups[grpKey];
+            if (grp.length >= 2) {
+                secondPlacesRank.push({
+                    ...grp[1],
+                    group: grpKey
+                });
+            }
+        });
+
+        secondPlacesRank.sort((a, b) => {
+            if (b.pts !== a.pts) return b.pts - a.pts;
+            if (b.exact !== a.exact) return b.exact - a.exact;
+            if (b.topExact !== a.topExact) return b.topExact - a.topExact;
+            if (b.tend !== a.tend) return b.tend - a.tend;
+            return a.seed - b.seed;
+        });
+
+        secondPlacesRank = secondPlacesRank.map((p, idx) => ({
+            ...p,
+            rank: idx + 1,
+            qualifiedToTop6: idx < 2
+        }));
+    }
+
+    const cupJson = {
+        leagueName: leagueName,
+        status: status,
+        lockedAtRound: isGroupsLocked ? 10 : null,
+        groups: finalGroups,
+        secondPlacesRank: secondPlacesRank,
+        aktualizovano: new Date().toISOString()
+    };
+
+    await uploadToR2(leagueName, "cup.json", cupJson);
+}
