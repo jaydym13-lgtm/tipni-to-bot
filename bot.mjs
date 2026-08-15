@@ -241,7 +241,7 @@ function emitReadySignalGlobal(streamName) {
             console.log("🚀 POŠŤÁK ODPALUJE HLAVNÍ LOOP: Všechna data jsou bezpečně v RAM. Vynucuji úvodní synchronizaci na R2...");
             
             rekonstruujAgregatyVsechny(true).then(() => {
-                providniApiHeartbeat();
+                console.log("✅ Úvodní synchronizace R2 dokončena. Čekám na první regulérní puls plánovače.");
             }).catch(err => console.error("❌ Selhal úvodní zápis agregátů:", err));
         }
     }
@@ -1302,13 +1302,21 @@ const zebricekMapa = {};
 }
 
 let isHeartbeatRunning = false;
+let posledniBehHeartbeatu = 0;
 
 async function providniApiHeartbeat() {
+    const nyniCas = Date.now();
+    if (nyniCas - posledniBehHeartbeatu < 45000) {
+        console.log("⏱️ COOLDOWN: Heartbeat běžel před méně než 45 s. Šetřím TheSportsDB API a přeskakuji dotaz.");
+        return;
+    }
+
     if (isHeartbeatRunning) {
         console.log("⏳ HEARTBEAT ALREADY RUNNING: Přeskakuji paralelní požadavek...");
         return;
     }
     isHeartbeatRunning = true;
+    posledniBehHeartbeatu = nyniCas;
 
     try {
         console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Heartbeat kontrola sportovního API pro ligy: ${SEZNAM_LIG.join(', ')}...`);
@@ -1380,7 +1388,7 @@ async function providniApiHeartbeat() {
                         continue;
                     }
 
-                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    await new Promise(resolve => setTimeout(resolve, 3000));
 
                     const sezoneYear = String(SEZONA_ID).replace("_", "-");
                     const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`);
@@ -1651,12 +1659,19 @@ async function startEnterpriseApplication() {
     console.log("=========================================================================");
 
     http.createServer((req, res) => {
-        console.log(`📡 PING PŘIJAT: Cloudový plánovač udeřil do serveru. Probouzím RAM a odpaluji Heartbeat...`);
-        
-        providniApiHeartbeat().catch(err => console.error("❌ Chyba při reaktivním spuštění:", err));
+        const url = req.url || "/";
 
-        res.writeHead(200, { "Content-Type": "text/plain" });
-        res.end("OK - Reaktivní backend mozek hlídá stadion.");
+        if (url === "/cron" || url.startsWith("/cron")) {
+            console.log(`📡 PING PŘIJAT (/cron): Cloudový plánovač udeřil do serveru. Probouzím RAM a odpaluji Heartbeat...`);
+            providniApiHeartbeat().catch(err => console.error("❌ Chyba při reaktivním spuštění:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Heartbeat spuštěn.");
+            return;
+        }
+
+        // Standardní Health Check pro Render (GET /) - do API vůbec nesahá
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("OK - Health Check v pořádku, backend mozek běží.");
     }).listen(PORT, () => {
         console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen a připraven pro Render.`);
     });
