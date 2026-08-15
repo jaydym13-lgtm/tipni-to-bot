@@ -53,11 +53,14 @@ const RAM_CENTRAL_MATCHES = {};
 // 🛡️ PAMĚŤ PRO KONTROLU PRÁZDNÝCH LIG (Chrání TheSportsDB před spamem)
 const LAST_EMPTY_LEAGUE_CHECK = {};
 
+// ⏱️ PAMĚŤ POSLEDNÍHO DOTAZU NA API PRO JEDNOTLIVÉ LIGY (2minutový ochranný štít)
+const LAST_LEAGUE_API_FETCH = {};
+
 // 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
 const RAM_BOT_CONFIG = {
     active: true,         // Hlavní nouzový vypínač bota
-    liveInterval: 3,      // Tvoje zvolené 3 minuty pro live skóre
-    waitInterval: 10      // Tvoje zvolených 10 minut pro čekání
+    liveInterval: 2,      // 2 minuty pro live skóre
+    waitInterval: 10      // 10 minut pro čekání
 };
 
 // Slovník pro autonomní překlad týmů ze sportovního API
@@ -1388,7 +1391,16 @@ async function providniApiHeartbeat() {
                         continue;
                     }
 
+                    const minLeagueIntervalMs = (RAM_BOT_CONFIG.liveInterval || 2) * 60 * 1000;
+                    const bylaLigaStazenaNedavno = (Date.now() - (LAST_LEAGUE_API_FETCH[leagueName] || 0) < minLeagueIntervalMs);
+
+                    if (bylaLigaStazenaNedavno) {
+                        console.log(`⏱️ RATE LIMIT SHIELD [${leagueName}]: Od posledního stažení uběhlo méně než 2 minuty. Šetřím TheSportsDB.`);
+                        continue;
+                    }
+
                     await new Promise(resolve => setTimeout(resolve, 3000));
+                    LAST_LEAGUE_API_FETCH[leagueName] = Date.now();
 
                     const sezoneYear = String(SEZONA_ID).replace("_", "-");
                     const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`);
