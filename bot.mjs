@@ -1343,7 +1343,7 @@ async function providniApiHeartbeat() {
                 const startMs = Date.parse(z.datum);
                 if (isNaN(startMs)) return false;
                 const rozdilMinut = (startMs - nyniMs) / (1000 * 60);
-                return rozdilMinut >= -240 && rozdilMinut <= 120;
+                return rozdilMinut >= -240 && rozdilMinut <= 10;
             });
 
             const maPrazdnouRam = centralneZapasyLigy.length === 0;
