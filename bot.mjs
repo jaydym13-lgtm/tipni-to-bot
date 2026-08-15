@@ -1403,7 +1403,12 @@ async function providniApiHeartbeat() {
                     LAST_LEAGUE_API_FETCH[leagueName] = Date.now();
 
                     const sezoneYear = String(SEZONA_ID).replace("_", "-");
-                    const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`);
+                    const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`, {
+                        headers: {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                            "Accept": "application/json, text/plain, */*"
+                        }
+                    });
 
                     if (!response.ok) throw new Error(`TheSportsDB error (${leagueName}): ${response.status}`);
                     const apiData = await response.json();
@@ -1416,14 +1421,16 @@ async function providniApiHeartbeat() {
                     console.log(`🔎 THESPORTSDB ENGINE [${leagueName}]: Načteno ${rawItems.length} reálných zápasů.`);
 
                     matches = rawItems.map(item => {
-                        const statusRaw = item.strStatus || "";
-                        const isFinished = statusRaw === "Match Finished" || statusRaw === "FT";
-                        const isLive = statusRaw === "In Progress" || statusRaw === "1H" || statusRaw === "2H" || statusRaw === "HT";
-                        const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
+                        const statusRaw = String(item.strStatus || "").trim();
+                        const sUpper = statusRaw.toUpperCase();
 
-                        const hasValidScore = item.intHomeScore !== null && item.intHomeScore !== undefined && item.intAwayScore !== null && item.intAwayScore !== undefined;
-                        const homeScore = (isFinished || isLive) && hasValidScore ? parseInt(item.intHomeScore) : undefined;
-                        const awayScore = (isFinished || isLive) && hasValidScore ? parseInt(item.intAwayScore) : undefined;
+                        const isFinished = sUpper === "MATCH FINISHED" || sUpper === "FT" || sUpper === "AOT" || sUpper === "AP" || sUpper === "FINISHED" || sUpper === "FULL TIME";
+                        const isLiveKeyword = sUpper === "IN PROGRESS" || sUpper === "1H" || sUpper === "2H" || sUpper === "HT" || 
+                                              sUpper === "LIVE" || sUpper === "HALFTIME" || sUpper === "1ST HALF" || sUpper === "2ND HALF" || 
+                                              sUpper === "ET" || sUpper === "EXTRA TIME" || sUpper === "PENALTIES" || statusRaw.includes("'");
+
+                        const hasValidScore = item.intHomeScore !== null && item.intHomeScore !== undefined && String(item.intHomeScore).trim() !== "" &&
+                                              item.intAwayScore !== null && item.intAwayScore !== undefined && String(item.intAwayScore).trim() !== "";
 
                         const rawHomeClean = (item.strHomeTeam || "Neznámý").replace(/ Prague/g, " Praha");
                         const rawAwayClean = (item.strAwayTeam || "Neznámý").replace(/ Prague/g, " Praha");
@@ -1438,7 +1445,6 @@ async function providniApiHeartbeat() {
                             }
                             const parsedDate = new Date(rawStr);
                             if (!isNaN(parsedDate.getTime())) {
-                                // 🛡️ DETERMINISTICKÝ PŘEPOČET ČASOVÉHO PÁSMA PRAHY (Bezpečné pro zimní i letní čas CET/CEST)
                                 const pragueFormatter = new Intl.DateTimeFormat('en-US', {
                                     timeZone: 'Europe/Prague',
                                     year: 'numeric', month: 'numeric', day: 'numeric',
@@ -1457,6 +1463,14 @@ async function providniApiHeartbeat() {
                                 matchIsoDate = parsedDate.toISOString();
                             }
                         }
+
+                        const matchTimeMs = Date.parse(matchIsoDate);
+                        const isPastKickoff = !isNaN(matchTimeMs) && (Date.now() >= matchTimeMs);
+                        const isLive = !isFinished && (isLiveKeyword || (hasValidScore && isPastKickoff));
+                        const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
+
+                        const homeScore = (isFinished || isLive || isPastKickoff) && hasValidScore ? parseInt(item.intHomeScore, 10) : undefined;
+                        const awayScore = (isFinished || isLive || isPastKickoff) && hasValidScore ? parseInt(item.intAwayScore, 10) : undefined;
 
                         return {
                             id: String(item.idEvent),
