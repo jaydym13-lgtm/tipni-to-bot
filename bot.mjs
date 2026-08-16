@@ -1449,8 +1449,9 @@ async function providniApiHeartbeat() {
                 if (!dbKey) continue;
 
                 await new Promise(resolve => setTimeout(resolve, 500));
-                const sezoneYear = String(SEZONA_ID).replace("_", "-");
-                const targetApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueConfig.id}&s=${sezoneYear}`;
+                // ⚡ ODLEHČENÝ LIVE DOTAZ: Taháme pouze dnešní zápasy místo celé sezóny (šetří 95 % zátěže)
+                const pragueDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date());
+                const targetApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsday.php?d=${pragueDate}&l=${leagueConfig.id}`;
                 const fetchHeaders = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
                     "Accept": "application/json, text/plain, */*"
