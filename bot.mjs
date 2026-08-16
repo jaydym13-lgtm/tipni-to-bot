@@ -1450,12 +1450,22 @@ async function providniApiHeartbeat() {
 
                 await new Promise(resolve => setTimeout(resolve, 500));
                 const sezoneYear = String(SEZONA_ID).replace("_", "-");
-                const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueConfig.id}&s=${sezoneYear}`, {
-                    headers: {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                        "Accept": "application/json, text/plain, */*"
+                const targetApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueConfig.id}&s=${sezoneYear}`;
+                const fetchHeaders = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*"
+                };
+
+                let response = null;
+                for (let pokus = 1; pokus <= 2; pokus++) {
+                    response = await fetch(targetApiUrl, { headers: fetchHeaders });
+                    if (response.ok) break;
+
+                    if (pokus === 1) {
+                        console.log(`⚠️ TheSportsDB [${leagueName}] odpověděla statusem ${response.status}. Zkouším záchranný pokus za 12 s...`);
+                        await new Promise(resolve => setTimeout(resolve, 12000));
                     }
-                });
+                }
 
                 if (!response.ok) throw new Error(`TheSportsDB error (${leagueName}): ${response.status}`);
                 const apiData = await response.json();
