@@ -1457,12 +1457,12 @@ async function providniApiHeartbeat() {
                 };
 
                 let response = null;
-                for (let pokus = 1; pokus <= 5; pokus++) {
+                for (let pokus = 1; pokus <= 3; pokus++) {
                     response = await fetch(targetApiUrl, { headers: fetchHeaders });
                     if (response.ok) break;
 
-                    if (pokus < 5) {
-                        console.log(`⚠️ TheSportsDB [${leagueName}] odpověděla statusem ${response.status} (pokus ${pokus}/5). Záchranný pokus za 7 s...`);
+                    if (pokus < 3) {
+                        console.log(`⚠️ TheSportsDB [${leagueName}] odpověděla statusem ${response.status} (pokus ${pokus}/3). Záchranný pokus za 7 s...`);
                         await new Promise(resolve => setTimeout(resolve, 7000));
                     }
                 }
@@ -1574,18 +1574,18 @@ async function synchronizujRozpisyVsechLig() {
             };
 
             let response = null;
-            for (let pokus = 1; pokus <= 5; pokus++) {
+            for (let pokus = 1; pokus <= 3; pokus++) {
                 response = await fetch(targetApiUrl, { headers: fetchHeaders });
                 if (response.ok) break;
 
-                if (pokus < 5) {
-                    console.log(`⚠️ KALENDÁŘ [${leagueName}]: API vrátilo ${response.status} (pokus ${pokus}/5). Opakuji za 7 s...`);
+                if (pokus < 3) {
+                    console.log(`⚠️ KALENDÁŘ [${leagueName}]: API vrátilo ${response.status} (pokus ${pokus}/3). Opakuji za 7 s...`);
                     await new Promise(resolve => setTimeout(resolve, 7000));
                 }
             }
 
             if (!response || !response.ok) {
-                console.error(`❌ KALENDÁŘ [${leagueName}]: Nepodařilo se stáhnout rozpis ani na 5. pokus (Status: ${response ? response.status : 'Error'}).`);
+                console.error(`❌ KALENDÁŘ [${leagueName}]: Nepodařilo se stáhnout rozpis ani na 3. pokus (Status: ${response ? response.status : 'Error'}).`);
                 continue;
             }
 
