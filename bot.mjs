@@ -59,7 +59,7 @@ const LAST_LEAGUE_API_FETCH = {};
 // 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
 const RAM_BOT_CONFIG = {
     active: true,         // Hlavní nouzový vypínač bota
-    liveInterval: 2,      // 2 minuty pro live skóre
+    liveInterval: 1,      // 1 minuta pro live skóre (Patreon Tier)
     waitInterval: 10      // 10 minut pro čekání
 };
 
@@ -1302,6 +1302,36 @@ const zebricekMapa = {};
         } catch (pulsErr) {
             console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
         }
+
+        // 📡 AUTONOMNÍ AKTUALIZACE RADARU (Počítá se přímo z RAM nezávisle na API)
+        try {
+            const nyniMs = Date.now();
+            let ligaBeziLive = false;
+            let minBudouciMs = Infinity;
+            let pristiZapasIso = null;
+
+            Object.values(centralMatches).forEach(z => {
+                const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+                const startMs = Date.parse(z.datum);
+
+                if (!isFinished) {
+                    if (z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || (!isNaN(startMs) && startMs <= nyniMs)) {
+                        ligaBeziLive = true;
+                    } else if (!isNaN(startMs) && startMs > nyniMs && startMs < minBudouciMs) {
+                        minBudouciMs = startMs;
+                        pristiZapasIso = z.datum;
+                    }
+                }
+            });
+
+            await db.collection("ligy").doc(leagueName).collection("stav").doc("radar").set({
+                beziLive: ligaBeziLive,
+                pristiZapasUtc: pristiZapasIso || null,
+                aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        } catch (radarErr) {
+            console.error(`❌ Selhal autonomní zápis radaru pro ${leagueName}:`, radarErr);
+        }
 }
 
 let isHeartbeatRunning = false;
@@ -1363,21 +1393,21 @@ async function providniApiHeartbeat() {
             }
 
             const centralneZapasyLigy = Object.values(RAM_CENTRAL_MATCHES[leagueName] || {});
-            const maAktivniZapasVRam = centralneZapasyLigy.some(z => z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED");
             const nyniMs = Date.now();
 
-            const maNeukoncenyZapasBlizko = centralneZapasyLigy.some(z => {
-                if (z.apiStatus === "FINISHED") return false;
+            const maAktivniNeboBlizkyZapas = centralneZapasyLigy.some(z => {
+                const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+                if (isFinished) return false;
                 const startMs = Date.parse(z.datum);
                 if (isNaN(startMs)) return false;
                 const rozdilMinut = (startMs - nyniMs) / (1000 * 60);
-                return rozdilMinut >= -240 && rozdilMinut <= 10;
+                return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || rozdilMinut <= 10;
             });
 
             const maPrazdnouRam = centralneZapasyLigy.length === 0;
             const uzBylaPrazdnaLigaDnesZkontrolovana = maPrazdnouRam && (Date.now() - (LAST_EMPTY_LEAGUE_CHECK[leagueName] || 0) < 12 * 60 * 60 * 1000);
 
-            if (uzBylaPrazdnaLigaDnesZkontrolovana || (!maPrazdnouRam && !maAktivniZapasVRam && !maNeukoncenyZapasBlizko)) {
+            if (uzBylaPrazdnaLigaDnesZkontrolovana || (!maPrazdnouRam && !maAktivniNeboBlizkyZapas)) {
                 console.log(`💤 SMART SCHEDULER [${leagueName}]: Žádný aktivní ani blízký zápas. Šetřím API kredity.`);
                 continue;
             }
@@ -1391,15 +1421,15 @@ async function providniApiHeartbeat() {
                         continue;
                     }
 
-                    const minLeagueIntervalMs = (RAM_BOT_CONFIG.liveInterval || 2) * 60 * 1000;
+                    const minLeagueIntervalMs = (RAM_BOT_CONFIG.liveInterval || 1) * 60 * 1000;
                     const bylaLigaStazenaNedavno = (Date.now() - (LAST_LEAGUE_API_FETCH[leagueName] || 0) < minLeagueIntervalMs);
 
                     if (bylaLigaStazenaNedavno) {
-                        console.log(`⏱️ RATE LIMIT SHIELD [${leagueName}]: Od posledního stažení uběhlo méně než 2 minuty. Šetřím TheSportsDB.`);
+                        console.log(`⏱️ RATE LIMIT SHIELD [${leagueName}]: Od posledního stažení uběhla méně než 1 minuta. Šetřím TheSportsDB.`);
                         continue;
                     }
 
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                     LAST_LEAGUE_API_FETCH[leagueName] = Date.now();
 
                     const sezoneYear = String(SEZONA_ID).replace("_", "-");
@@ -1644,16 +1674,6 @@ async function providniApiHeartbeat() {
                         postup: postupVal || stary?.postup || "",
                         spyUploaded: spyJizOdeslano
                     };
-                }
-
-                try {
-                    await db.collection("ligy").doc(leagueName).collection("stav").doc("radar").set({
-                        beziLive: celkovyObsahujeAktivniZapas,
-                        pristiZapasUtc: pristiZapasIso || null,
-                        aktualizovano: admin.firestore.FieldValue.serverTimestamp()
-                    }, { merge: true });
-                } catch (radarErr) {
-                    console.error(`❌ Selhal radar pro ${leagueName}:`, radarErr);
                 }
 
             } catch (err) {
