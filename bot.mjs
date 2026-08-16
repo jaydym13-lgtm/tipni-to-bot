@@ -1457,17 +1457,17 @@ async function providniApiHeartbeat() {
                 };
 
                 let response = null;
-                for (let pokus = 1; pokus <= 2; pokus++) {
+                for (let pokus = 1; pokus <= 3; pokus++) {
                     response = await fetch(targetApiUrl, { headers: fetchHeaders });
                     if (response.ok) break;
 
-                    if (pokus === 1) {
-                        console.log(`⚠️ TheSportsDB [${leagueName}] odpověděla statusem ${response.status}. Zkouším záchranný pokus za 12 s...`);
-                        await new Promise(resolve => setTimeout(resolve, 12000));
+                    if (pokus < 3) {
+                        console.log(`⚠️ TheSportsDB [${leagueName}] odpověděla statusem ${response.status} (pokus ${pokus}/3). Záchranný pokus za 8 s...`);
+                        await new Promise(resolve => setTimeout(resolve, 8000));
                     }
                 }
 
-                if (!response.ok) throw new Error(`TheSportsDB error (${leagueName}): ${response.status}`);
+                if (!response || !response.ok) throw new Error(`TheSportsDB error (${leagueName}): ${response ? response.status : 'No response'}`);
                 const apiData = await response.json();
                 const rawItems = apiData.events || [];
 
@@ -1567,14 +1567,28 @@ async function synchronizujRozpisyVsechLig() {
         try {
             await new Promise(resolve => setTimeout(resolve, 1000));
             const sezoneYear = String(SEZONA_ID).replace("_", "-");
-            const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueConfig.id}&s=${sezoneYear}`, {
-                headers: {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                    "Accept": "application/json, text/plain, */*"
-                }
-            });
+            const targetApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueConfig.id}&s=${sezoneYear}`;
+            const fetchHeaders = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*"
+            };
 
-            if (!response.ok) continue;
+            let response = null;
+            for (let pokus = 1; pokus <= 3; pokus++) {
+                response = await fetch(targetApiUrl, { headers: fetchHeaders });
+                if (response.ok) break;
+
+                if (pokus < 3) {
+                    console.log(`⚠️ KALENDÁŘ [${leagueName}]: API vrátilo ${response.status} (pokus ${pokus}/3). Opakuji za 5 s...`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
+            }
+
+            if (!response || !response.ok) {
+                console.error(`❌ KALENDÁŘ [${leagueName}]: Nepodařilo se stáhnout rozpis ani na 3. pokus (Status: ${response ? response.status : 'Error'}).`);
+                continue;
+            }
+
             const apiData = await response.json();
             const rawItems = apiData.events || [];
             console.log(`🔎 KALENDÁŘ [${leagueName}]: Načteno ${rawItems.length} zápasů.`);
