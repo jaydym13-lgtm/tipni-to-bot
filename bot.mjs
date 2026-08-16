@@ -1438,7 +1438,7 @@ async function providniApiHeartbeat() {
                 const startMs = Date.parse(z.datum);
                 if (isNaN(startMs)) return false;
                 const rozdilMinut = (startMs - nyniMs) / (1000 * 60);
-                return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || rozdilMinut <= 10;
+                return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || rozdilMinut <= 10 || (nyniMs >= startMs);
             });
 
             if (!maAktivniZapas) {
