@@ -1345,6 +1345,7 @@ const zebricekMapa = {};
 
 let isHeartbeatRunning = false;
 
+// 🔴 LIVE TRACKER: Běží každou 1 minutu během zápasů – stahuje VÝHRADNĚ ligy s aktivní hrou
 async function providniApiHeartbeat() {
     if (isHeartbeatRunning) {
         console.log("⏳ HEARTBEAT ALREADY RUNNING: Přeskakuji paralelní požadavek...");
@@ -1353,23 +1354,20 @@ async function providniApiHeartbeat() {
     isHeartbeatRunning = true;
 
     try {
-        console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Heartbeat kontrola sportovního API pro ligy: ${SEZNAM_LIG.join(', ')}...`);
-        
         if (!RAM_BOT_CONFIG.active) {
-            console.log("⛔ BOT MANUÁLNĚ VYPNUT: Ovládací panel hlásí force_stop. Spím a nezatěžuji API...");
-            setTimeout(providniApiHeartbeat, RAM_BOT_CONFIG.waitInterval * 60 * 1000);
+            console.log("⛔ BOT MANUÁLNĚ VYPNUT: Ovládací panel hlásí force_stop. Spím...");
             return;
         }
 
         const dbKey = process.env.THESPORTSDB_KEY;
         const nyniMs = Date.now();
+        const nyni = new Date();
 
         let celkovyDosloKStavoveZmene = false;
         let celkovyObsahujeAktivniZapas = false;
         let minRozdilDoZapasu = Infinity;
-        let pristiZapasIso = null;
 
-        // 🧠 AUTONOMNÍ ZJIŠTĚNÍ STAVU Z RAM: Zda běží jakýkoliv živý zápas a kdy je nejbližší budoucí výkop
+        // 🧠 AUTONOMNÍ SKEN RAM: Zjistíme stav napříč všemi ligami přímo z paměti
         for (const lName of SEZNAM_LIG) {
             const cZapasy = Object.values(RAM_CENTRAL_MATCHES[lName] || {});
             for (const z of cZapasy) {
@@ -1384,25 +1382,20 @@ async function providniApiHeartbeat() {
                     celkovyObsahujeAktivniZapas = true;
                 } else if (rozdilMin > 0 && rozdilMin < minRozdilDoZapasu) {
                     minRozdilDoZapasu = rozdilMin;
-                    pristiZapasIso = z.datum;
                 }
             }
         }
 
+        console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Live kontrola skóre pro aktivní soutěže...`);
+
         for (const leagueName of SEZNAM_LIG) {
             const leagueConfig = LIGY_API_MAPA[leagueName] || { id: "WC", provider: "MANUAL" };
-            const provider = leagueConfig.provider;
-            const leagueApiId = leagueConfig.id;
-
-            if (provider === "MANUAL") {
-                console.log(`ℹ️ Liga [${leagueName}] běží v čistém Firestore režimu (MANUAL).`);
-                continue;
-            }
+            if (leagueConfig.provider === "MANUAL") continue;
 
             const centralneZapasyLigy = Object.values(RAM_CENTRAL_MATCHES[leagueName] || {});
-            const nyniMs = Date.now();
 
-            const maAktivniNeboBlizkyZapas = centralneZapasyLigy.some(z => {
+            // 🎯 SENIOR BRÁNA: Saháme na API POUZE pokud se v lize reálně hraje nebo je T-10 min před výkopem
+            const maAktivniZapas = centralneZapasyLigy.some(z => {
                 const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
                 if (isFinished) return false;
                 const startMs = Date.parse(z.datum);
@@ -1411,180 +1404,48 @@ async function providniApiHeartbeat() {
                 return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || rozdilMinut <= 10;
             });
 
-            const maPrazdnouRam = centralneZapasyLigy.length === 0;
-            const uzBylaPrazdnaLigaDnesZkontrolovana = maPrazdnouRam && (Date.now() - (LAST_EMPTY_LEAGUE_CHECK[leagueName] || 0) < 12 * 60 * 60 * 1000);
-
-            if (uzBylaPrazdnaLigaDnesZkontrolovana || (!maPrazdnouRam && !maAktivniNeboBlizkyZapas)) {
-                console.log(`💤 SMART SCHEDULER [${leagueName}]: Žádný aktivní ani blízký zápas. Šetřím API kredity.`);
+            if (!maAktivniZapas) {
                 continue;
             }
 
             try {
-                let matches = [];
+                if (!dbKey) continue;
 
-                if (provider === "THESPORTSDB") {
-                    if (!dbKey) {
-                        console.log(`⚠️ Chybí THESPORTSDB_KEY pro [${leagueName}]. Přeskakuji...`);
-                        continue;
+                await new Promise(resolve => setTimeout(resolve, 500));
+                const sezoneYear = String(SEZONA_ID).replace("_", "-");
+                const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueConfig.id}&s=${sezoneYear}`, {
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                        "Accept": "application/json, text/plain, */*"
                     }
+                });
 
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                if (!response.ok) throw new Error(`TheSportsDB error (${leagueName}): ${response.status}`);
+                const apiData = await response.json();
+                const rawItems = apiData.events || [];
 
-                    const sezoneYear = String(SEZONA_ID).replace("_", "-");
-                    const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`, {
-                        headers: {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                            "Accept": "application/json, text/plain, */*"
-                        }
-                    });
+                for (const item of rawItems) {
+                    const apiId = String(item.idEvent);
+                    const stary = RAM_CENTRAL_MATCHES[leagueName]?.[apiId];
+                    if (!stary) continue;
 
-                    if (!response.ok) throw new Error(`TheSportsDB error (${leagueName}): ${response.status}`);
-                    const apiData = await response.json();
-                    const rawItems = apiData.events || [];
+                    const statusRaw = String(item.strStatus || "").trim().toUpperCase();
+                    const isFinished = statusRaw === "MATCH FINISHED" || statusRaw === "FT" || statusRaw === "AOT" || statusRaw === "AP" || statusRaw === "FINISHED" || statusRaw === "FULL TIME";
+                    const isLiveKeyword = statusRaw === "IN PROGRESS" || statusRaw === "1H" || statusRaw === "2H" || statusRaw === "HT" || statusRaw === "LIVE" || statusRaw.includes("'");
+                    const hasValidScore = item.intHomeScore !== null && item.intHomeScore !== undefined && String(item.intHomeScore).trim() !== "" &&
+                                          item.intAwayScore !== null && item.intAwayScore !== undefined && String(item.intAwayScore).trim() !== "";
 
-                    if (rawItems.length === 0 && maPrazdnouRam) {
-                        LAST_EMPTY_LEAGUE_CHECK[leagueName] = Date.now();
-                    }
+                    const startZapasuMs = Date.parse(stary.datum);
+                    const isPastKickoff = !isNaN(startZapasuMs) && (nyniMs >= startZapasuMs);
+                    const isLive = !isFinished && (isLiveKeyword || (hasValidScore && isPastKickoff));
+                    const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
 
-                    console.log(`🔎 THESPORTSDB ENGINE [${leagueName}]: Načteno ${rawItems.length} reálných zápasů.`);
+                    const golyDomaci = (isFinished || isLive || isPastKickoff) && hasValidScore ? parseInt(item.intHomeScore, 10) : undefined;
+                    const golyHoste = (isFinished || isLive || isPastKickoff) && hasValidScore ? parseInt(item.intAwayScore, 10) : undefined;
 
-                    matches = rawItems.map(item => {
-                        const statusRaw = String(item.strStatus || "").trim();
-                        const sUpper = statusRaw.toUpperCase();
-
-                        const isFinished = sUpper === "MATCH FINISHED" || sUpper === "FT" || sUpper === "AOT" || sUpper === "AP" || sUpper === "FINISHED" || sUpper === "FULL TIME";
-                        const isLiveKeyword = sUpper === "IN PROGRESS" || sUpper === "1H" || sUpper === "2H" || sUpper === "HT" || 
-                                              sUpper === "LIVE" || sUpper === "HALFTIME" || sUpper === "1ST HALF" || sUpper === "2ND HALF" || 
-                                              sUpper === "ET" || sUpper === "EXTRA TIME" || sUpper === "PENALTIES" || statusRaw.includes("'");
-
-                        const hasValidScore = item.intHomeScore !== null && item.intHomeScore !== undefined && String(item.intHomeScore).trim() !== "" &&
-                                              item.intAwayScore !== null && item.intAwayScore !== undefined && String(item.intAwayScore).trim() !== "";
-
-                        const rawHomeClean = (item.strHomeTeam || "Neznámý").replace(/ Prague/g, " Praha");
-                        const rawAwayClean = (item.strAwayTeam || "Neznámý").replace(/ Prague/g, " Praha");
-                        const roundNum = parseInt(item.intRound) || 1;
-
-                        let matchIsoDate = new Date().toISOString();
-                        let rawStr = item.strTimestamp || (item.dateEvent ? `${item.dateEvent}T${item.strTime || "00:00:00"}` : null);
-                        if (rawStr) {
-                            rawStr = rawStr.replace(" ", "T");
-                            if (!rawStr.endsWith("Z") && !rawStr.includes("+") && !rawStr.includes("-")) {
-                                rawStr += "Z";
-                            }
-                            const parsedDate = new Date(rawStr);
-                            if (!isNaN(parsedDate.getTime())) {
-                                const pragueFormatter = new Intl.DateTimeFormat('en-US', {
-                                    timeZone: 'Europe/Prague',
-                                    year: 'numeric', month: 'numeric', day: 'numeric',
-                                    hour: 'numeric', minute: 'numeric', second: 'numeric',
-                                    hour12: false
-                                });
-                                const pParts = {};
-                                pragueFormatter.formatToParts(parsedDate).forEach(({ type, value }) => {
-                                    pParts[type] = parseInt(value, 10);
-                                });
-                                if (pParts.hour === 24) pParts.hour = 0;
-                                const pragueUtcMs = Date.UTC(pParts.year, pParts.month - 1, pParts.day, pParts.hour, pParts.minute, pParts.second);
-                                const diffHours = Math.round((pragueUtcMs - parsedDate.getTime()) / (1000 * 60 * 60));
-
-                                parsedDate.setHours(parsedDate.getHours() + diffHours);
-                                matchIsoDate = parsedDate.toISOString();
-                            }
-                        }
-
-                        const matchTimeMs = Date.parse(matchIsoDate);
-                        const isPastKickoff = !isNaN(matchTimeMs) && (Date.now() >= matchTimeMs);
-                        const isLive = !isFinished && (isLiveKeyword || (hasValidScore && isPastKickoff));
-                        const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
-
-                        const homeScore = (isFinished || isLive || isPastKickoff) && hasValidScore ? parseInt(item.intHomeScore, 10) : undefined;
-                        const awayScore = (isFinished || isLive || isPastKickoff) && hasValidScore ? parseInt(item.intAwayScore, 10) : undefined;
-
-                        return {
-                            id: String(item.idEvent),
-                            status: statusStr,
-                            utcDate: matchIsoDate,
-                            homeTeam: { name: slovnikTymu[rawHomeClean] || rawHomeClean },
-                            awayTeam: { name: slovnikTymu[rawAwayClean] || rawAwayClean },
-                            stage: "REGULAR_SEASON",
-                            matchday: roundNum,
-                            score: {
-                                fullTime: { home: homeScore, away: awayScore },
-                                winner: (homeScore > awayScore) ? "HOME_TEAM" : ((awayScore > homeScore) ? "AWAY_TEAM" : null)
-                            }
-                        };
-                    });
-                }
-
-                const nyniMilisekundy = Date.now();
-                const nyni = new Date();
-
-                for (const match of matches) {
-                    const apiId = String(match.id);
-                    const status = match.status;
-                    const startZapasuMilisekundy = Date.parse(match.utcDate);
-                    const rozdilMinut = (startZapasuMilisekundy - nyniMilisekundy) / (1000 * 60);
-
-                    const uzSeHrajePodleAPI = status === "IN_PLAY" || status === "PAUSED" || status === "LIVE";
-                    const matchStarted = uzSeHrajePodleAPI || (nyniMilisekundy >= startZapasuMilisekundy);
-
-                    if (status !== "FINISHED" && rozdilMinut <= 0) {
-                        celkovyObsahujeAktivniZapas = true;
-                    }
-
-                    if (rozdilMinut > 0 && rozdilMinut < minRozdilDoZapasu) {
-                        minRozdilDoZapasu = rozdilMinut;
-                        pristiZapasIso = match.utcDate;
-                    }
-
-                    const rawDomaci = match.homeTeam?.name || "Neznámý";
-                    const rawHoste = match.awayTeam?.name || "Neznámý";
-                    const domaci = slovnikTymu[rawDomaci] || rawDomaci;
-                    const hoste = slovnikTymu[rawHoste] || rawHoste;
-                    const isPlayoff = match.stage !== "GROUP_STAGE" && match.stage !== "REGULAR_SEASON";
-
-                    let golyDomaci = undefined; let golyHoste = undefined; let postupVal = "";
-                    const jeZapasAktivni = status === "FINISHED" || status === "IN_PLAY" || status === "PAUSED";
-                    
-                    if (jeZapasAktivni && match.score) {
-                        const fTime = match.score.fullTime;
-                        const eTime = match.score.extraTime || { home: 0, away: 0 };
-                        const pTime = match.score.penalties || { home: 0, away: 0 };
-
-                        if (fTime && fTime.home !== null && fTime.home !== undefined) {
-                            let extraHome = (eTime.home !== null && eTime.home !== undefined) ? parseInt(eTime.home) : 0;
-                            let extraAway = (eTime.away !== null && eTime.away !== undefined) ? parseInt(eTime.away) : 0;
-                            let penHome = (pTime.home !== null && pTime.home !== undefined) ? parseInt(pTime.home) : 0;
-                            let penAway = (pTime.away !== null && pTime.away !== undefined) ? parseInt(pTime.away) : 0;
-
-                            if (status === "FINISHED" && match.score.duration === "EXTRA_TIME") {
-                                golyDomaci = parseInt(fTime.home) - extraHome;
-                                golyHoste = parseInt(fTime.away) - extraAway;
-                            } else if (status === "FINISHED" && match.score.duration === "PENALTY_SHOOTOUT") {
-                                golyDomaci = parseInt(fTime.home) - extraHome - penHome;
-                                golyHoste = parseInt(fTime.away) - extraAway - penAway;
-                            } else {
-                                golyDomaci = parseInt(fTime.home);
-                                golyHoste = parseInt(fTime.away);
-                            }
-                        }
-
-                        if (isPlayoff && match.score.winner) {
-                            if (match.score.winner === "HOME_TEAM") postupVal = "domaci";
-                            if (match.score.winner === "AWAY_TEAM") postupVal = "hoste";
-                        }
-                    }
-
-                    if (status === "IN_PLAY" || status === "PAUSED") {
-                        celkovyObsahujeAktivniZapas = true;
-                    }
-
-                    const stary = RAM_CENTRAL_MATCHES[leagueName] ? RAM_CENTRAL_MATCHES[leagueName][apiId] : null;
-                    let spyJizOdeslano = stary?.spyUploaded || false;
-
-                    if (status !== "FINISHED" && matchStarted && !spyJizOdeslano) {
-                        console.log(`🔒 LOCK T-0 [${leagueName}]: Výkop zápasu ${domaci} – ${hoste}. Zmrazuji tipy!`);
-                        
+                    let spyJizOdeslano = stary.spyUploaded || false;
+                    if (statusStr !== "FINISHED" && isPastKickoff && !spyJizOdeslano) {
+                        console.log(`🔒 LOCK T-0 [${leagueName}]: Výkop zápasu ${stary.domaci} – ${stary.hoste}. Zmrazuji tipy!`);
                         const tipyProZapasPole = [];
                         Object.keys(RAM_USERS_PROFILES).forEach(uid => {
                             const p = RAM_USERS_PROFILES[uid];
@@ -1595,87 +1456,35 @@ async function providniApiHeartbeat() {
                             const uTip = uTips[apiId];
                             if (uTip && uTip.tip_domaci !== undefined) {
                                 tipyProZapasPole.push({
-                                    uid: uid,
-                                    userEmail: p.email,
-                                    nickname: p.nickname,
-                                    tip_domaci: parseInt(uTip.tip_domaci),
-                                    tip_hoste: parseInt(uTip.tip_hoste),
-                                    postup: uTip.postup || ''
+                                    uid: uid, userEmail: p.email, nickname: p.nickname,
+                                    tip_domaci: parseInt(uTip.tip_domaci), tip_hoste: parseInt(uTip.tip_hoste), postup: uTip.postup || ''
                                 });
                             }
                         });
-
                         await uploadToR2(leagueName, `spy_zapas_${apiId}.json`, { tipy: tipyProZapasPole, aktualizovano: nyni.toISOString() });
                         spyJizOdeslano = true;
+                        stary.spyUploaded = true;
                         celkovyDosloKStavoveZmene = leagueName;
                     }
 
-                    if (!stary || stary.apiStatus !== status || stary.vysledek_domaci !== golyDomaci || stary.vysledek_hoste !== golyHoste || stary.postup !== postupVal) {
+                    const zmenilSeStav = (stary.apiStatus !== statusStr) || (stary.vysledek_domaci !== golyDomaci) || (stary.vysledek_hoste !== golyHoste);
+                    if (zmenilSeStav) {
+                        console.log(`⚽ LIVE SKÓRE [${leagueName}]: ${stary.domaci} ${golyDomaci ?? '-'} : ${golyHoste ?? '-'} ${stary.hoste} (${statusStr})`);
+                        stary.apiStatus = statusStr;
+                        stary.vysledek_domaci = golyDomaci;
+                        stary.vysledek_hoste = golyHoste;
                         celkovyDosloKStavoveZmene = leagueName;
-                    }
 
-                    const stage = match.stage || "";
-                    let spravneKoloTurnaje = "Šampionát";
-
-                    if (isPlayoff) {
-                        if (stage === "QUARTER_FINALS") spravneKoloTurnaje = "Čtvrtfinále";
-                        else if (stage === "SEMI_FINALS") spravneKoloTurnaje = "Semifinále";
-                        else if (stage === "THIRD_PLACE") spravneKoloTurnaje = "Zápas o 3. místo";
-                        else if (stage === "FINAL") spravneKoloTurnaje = "Finále";
-                        else spravneKoloTurnaje = "Play-off";
-                    } else if (match.matchday && parseInt(match.matchday) > 0) {
-                        spravneKoloTurnaje = `${parseInt(match.matchday)}. kolo`;
-                    }
-                    const finalDomaci = (!stary || stary.domaci === "Neznámý") ? domaci : stary.domaci;
-                    const finalHoste = (!stary || stary.hoste === "Neznámý") ? hoste : stary.hoste;
-
-                    const detekovanNovyRozlosovanyTym = stary && (stary.domaci === "Neznámý" && domaci !== "Neznámý");
-                    const jeUkoncenBezVysledkuVDB = status === "FINISHED" && golyDomaci !== undefined && golyHoste !== undefined && (!stary || stary.vysledek_domaci === undefined);
-                    const potrebujeOpravitKoloVDB = stary && (stary.kolo !== spravneKoloTurnaje);
-                    const jeNovyZapasVDB = !stary;
-                    const zmenilSeApiStatus = stary && (stary.apiStatus !== status);
-                    const zmeniloSeSkore = stary && (stary.vysledek_domaci !== golyDomaci || stary.vysledek_hoste !== golyHoste);
-                    const potrebujeOpravitNazevTymu = stary && (stary.domaci !== domaci || stary.hoste !== hoste);
-                    const potrebujeOpravitDatumVDB = stary && (stary.datum !== match.utcDate);
-
-                    if (jeNovyZapasVDB || zmenilSeApiStatus || zmeniloSeSkore || detekovanNovyRozlosovanyTym || jeUkoncenBezVysledkuVDB || potrebujeOpravitKoloVDB || potrebujeOpravitNazevTymu || potrebujeOpravitDatumVDB) {
-                        console.log(`💾 AUTO-SYNC FIREBASE [${leagueName}]: ${finalDomaci} - ${finalHoste} (${spravneKoloTurnaje})`);
-                        const syncPayload = {
-                            domaci: domaci,
-                            hoste: hoste,
-                            apiStatus: status,
-                            kolo: spravneKoloTurnaje,
-                            isPlayoff: isPlayoff,
-                            datum: match.utcDate
-                        };
-                        if (stary?.isTopMatch) syncPayload.isTopMatch = true;
+                        const syncPayload = { apiStatus: statusStr };
                         if (golyDomaci !== undefined) syncPayload.vysledek_domaci = golyDomaci;
                         if (golyHoste !== undefined) syncPayload.vysledek_hoste = golyHoste;
-                        if (postupVal) syncPayload.postup = postupVal;
 
                         db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").doc(apiId).set(syncPayload, { merge: true })
-                            .catch(e => console.error(`❌ Chyba sync Firebase [${leagueName}]:`, e));
+                            .catch(e => console.error(`❌ Chyba sync skóre [${leagueName}]:`, e));
                     }
-
-                    if (!RAM_CENTRAL_MATCHES[leagueName]) RAM_CENTRAL_MATCHES[leagueName] = {};
-                    RAM_CENTRAL_MATCHES[leagueName][apiId] = {
-                        domaci: finalDomaci,
-                        hoste: finalHoste,
-                        datum: match.utcDate,
-                        isPlayoff: stary?.isPlayoff !== undefined ? stary.isPlayoff : isPlayoff,
-                        isTopMatch: stary?.isTopMatch || false,
-                        kolo: spravneKoloTurnaje,
-                        stage: match.stage || stary?.stage || "",
-                        vysledek_domaci: golyDomaci !== undefined ? golyDomaci : stary?.vysledek_domaci,
-                        vysledek_hoste: golyHoste !== undefined ? golyHoste : stary?.vysledek_hoste,
-                        apiStatus: status,
-                        postup: postupVal || stary?.postup || "",
-                        spyUploaded: spyJizOdeslano
-                    };
                 }
-
             } catch (err) {
-                console.error(`❌ Chyba v heartbeat smyčce pro ${leagueName}:`, err);
+                console.error(`❌ Chyba při live čtení pro ${leagueName}:`, err);
             }
         }
 
@@ -1683,17 +1492,85 @@ async function providniApiHeartbeat() {
             await rekonstruujAgregatyProLigu(celkovyDosloKStavoveZmene, true);
         }
 
-        const jeZapasV_OkneBojovehoRezimu = minRozdilDoZapasu <= 6;
-        if (celkovyObsahujeAktivniZapas || jeZapasV_OkneBojovehoRezimu) {
-            console.log(`🚀 STATUS: Zápasy aktivně běží nebo se blíží výkop.`);
+        if (celkovyObsahujeAktivniZapas) {
+            console.log(`🚀 STATUS: Zápasy aktivně běží.`);
         } else {
-            console.log(`💤 STATUS: Klid zbraní. Nejbližší zápas je za ${Math.round(minRozdilDoZapasu)} min.`);
+            console.log(`💤 STATUS: Žádné aktivní zápasy. Nejbližší výkop za ${Math.round(minRozdilDoZapasu)} min.`);
         }
     } catch (err) {
-        console.error(`❌ Chyba v heartbeat smyčce:`, err);
+        console.error(`❌ Chyba v live smyčce:`, err);
     } finally {
         isHeartbeatRunning = false;
     }
+}
+
+// 📅 HLOUBKOVÝ KALENDÁŘ: Běží 3x denně (3:00, 9:00, 14:00) – stahuje a mapuje kompletní rozpis všech lig
+async function synchronizujRozpisyVsechLig() {
+    console.log("=========================================================================");
+    console.log("📅 SERVISNÍ KALENDÁŘ: Spouštím hloubkovou synchronizaci zápasů všech lig...");
+    console.log("=========================================================================");
+
+    const dbKey = process.env.THESPORTSDB_KEY;
+    if (!dbKey) return;
+
+    for (const leagueName of SEZNAM_LIG) {
+        const leagueConfig = LIGY_API_MAPA[leagueName] || { id: "WC", provider: "MANUAL" };
+        if (leagueConfig.provider === "MANUAL") continue;
+
+        try {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const sezoneYear = String(SEZONA_ID).replace("_", "-");
+            const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueConfig.id}&s=${sezoneYear}`, {
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*"
+                }
+            });
+
+            if (!response.ok) continue;
+            const apiData = await response.json();
+            const rawItems = apiData.events || [];
+            console.log(`🔎 KALENDÁŘ [${leagueName}]: Načteno ${rawItems.length} zápasů.`);
+
+            for (const item of rawItems) {
+                const apiId = String(item.idEvent);
+                const rawDomaci = (item.strHomeTeam || "Neznámý").replace(/ Prague/g, " Praha");
+                const rawHoste = (item.strAwayTeam || "Neznámý").replace(/ Prague/g, " Praha");
+                const domaci = slovnikTymu[rawDomaci] || rawHomeClean || rawDomaci;
+                const hoste = slovnikTymu[rawHoste] || rawAwayClean || rawHoste;
+                const roundNum = parseInt(item.intRound) || 1;
+                const isPlayoff = item.strStage && item.strStage !== "GROUP_STAGE" && item.strStage !== "REGULAR_SEASON";
+
+                let matchIsoDate = new Date().toISOString();
+                let rawStr = item.strTimestamp || (item.dateEvent ? `${item.dateEvent}T${item.strTime || "00:00:00"}` : null);
+                if (rawStr) {
+                    rawStr = rawStr.replace(" ", "T");
+                    if (!rawStr.endsWith("Z") && !rawStr.includes("+") && !rawStr.includes("-")) rawStr += "Z";
+                    const parsedDate = new Date(rawStr);
+                    if (!isNaN(parsedDate.getTime())) matchIsoDate = parsedDate.toISOString();
+                }
+
+                let spravneKolo = `${roundNum}. kolo`;
+                const stary = RAM_CENTRAL_MATCHES[leagueName]?.[apiId];
+
+                const matchPayload = {
+                    domaci: domaci,
+                    hoste: hoste,
+                    datum: matchIsoDate,
+                    kolo: spravneKolo,
+                    isPlayoff: isPlayoff || false
+                };
+                if (stary?.isTopMatch) matchPayload.isTopMatch = true;
+
+                await db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").doc(apiId).set(matchPayload, { merge: true });
+            }
+
+            await rekonstruujAgregatyProLigu(leagueName, true);
+        } catch (e) {
+            console.error(`❌ Chyba kalendáře pro ${leagueName}:`, e);
+        }
+    }
+    console.log("✅ Hloubková synchronizace kalendářů dokončena.");
 }
 
 // --- 🌐 LIFECYCLE INITIALIZATION BOOTSTRAP ---
@@ -1710,6 +1587,14 @@ async function startEnterpriseApplication() {
             providniApiHeartbeat().catch(err => console.error("❌ Chyba při reaktivním spuštění:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
             res.end("OK - Heartbeat spuštěn.");
+            return;
+        }
+
+        if (url === "/sync-fixtures" || url.startsWith("/sync-fixtures")) {
+            console.log(`📅 SERVISNÍ PING (/sync-fixtures): Spouštím hloubkovou kontrolu kalendářů všech lig...`);
+            synchronizujRozpisyVsechLig().catch(err => console.error("❌ Chyba při synchronizaci rozpisů:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Synchronizace rozpisů zahájena.");
             return;
         }
 
