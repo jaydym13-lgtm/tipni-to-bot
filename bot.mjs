@@ -1008,6 +1008,8 @@ const zebricekMapa = {};
         // 👑 KRÁLOVÉ KOL: Oficiální výhry se počítají POUZE z dohraných kol, LIVE výhry i z běžících
         const vyhraVKolePocet = {};
         const vyhraVKolePocetLive = {};
+        const vyhranaKolaSeznam = {};
+        const vyhranaKolaSeznamLive = {};
 
         const vsechnyKolaKlice = new Set();
         Object.keys(zebricekMapa).forEach(uid => {
@@ -1026,6 +1028,8 @@ const zebricekMapa = {};
                     if (zebricekMapa[uid].bodyPoKolech?.[klicKola] === maxPts) {
                         const nick = zebricekMapa[uid].nickname;
                         vyhraVKolePocet[nick] = (vyhraVKolePocet[nick] || 0) + 1;
+                        if (!vyhranaKolaSeznam[nick]) vyhranaKolaSeznam[nick] = [];
+                        vyhranaKolaSeznam[nick].push(klicKola);
                     }
                 });
             }
@@ -1043,28 +1047,36 @@ const zebricekMapa = {};
                     if (zebricekMapa[uid].bodyPoKolechLive?.[klicKola] === maxPtsLive) {
                         const nick = zebricekMapa[uid].nickname;
                         vyhraVKolePocetLive[nick] = (vyhraVKolePocetLive[nick] || 0) + 1;
+                        if (!vyhranaKolaSeznamLive[nick]) vyhranaKolaSeznamLive[nick] = [];
+                        vyhranaKolaSeznamLive[nick].push(klicKola);
                     }
                 });
             }
         });
 
-    const vsechnyHraciKola = Object.keys(vyhraVKolePocet).map(nick => ({
-        nickname: nick, count: vyhraVKolePocet[nick]
-    })).filter(p => p.count > 0);
-    const unikatniHraciKolaBadges = [...new Set(vsechnyHraciKola.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-    const top3HraciKola = unikatniHraciKolaBadges.map(count => {
-        const nicks = vsechnyHraciKola.filter(p => p.count === count).map(p => p.nickname);
-        return { count, names: nicks.join(', ') };
-    });
+        const vsechnyHraciKola = Object.keys(vyhraVKolePocet).map(nick => ({
+            nickname: nick,
+            count: vyhraVKolePocet[nick],
+            rounds: (vyhranaKolaSeznam[nick] || []).join(', ')
+        })).filter(p => p.count > 0);
+        const unikatniHraciKolaBadges = [...new Set(vsechnyHraciKola.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+        const top3HraciKola = unikatniHraciKolaBadges.map(count => {
+            const entries = vsechnyHraciKola.filter(p => p.count === count);
+            const formattedArr = entries.map(e => `${e.nickname} (${e.rounds})`);
+            return { count, names: formattedArr.join(', ') };
+        });
 
-    const vsechnyHraciKolaLive = Object.keys(vyhraVKolePocetLive).map(nick => ({
-        nickname: nick, count: vyhraVKolePocetLive[nick]
-    })).filter(p => p.count > 0);
-    const unikatniHraciKolaBadgesLive = [...new Set(vsechnyHraciKolaLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-    const top3HraciKolaLive = unikatniHraciKolaBadgesLive.map(count => {
-        const nicks = vsechnyHraciKolaLive.filter(p => p.count === count).map(p => p.nickname);
-        return { count, names: nicks.join(', ') };
-    });
+        const vsechnyHraciKolaLive = Object.keys(vyhraVKolePocetLive).map(nick => ({
+            nickname: nick,
+            count: vyhraVKolePocetLive[nick],
+            rounds: (vyhranaKolaSeznamLive[nick] || []).join(', ')
+        })).filter(p => p.count > 0);
+        const unikatniHraciKolaBadgesLive = [...new Set(vsechnyHraciKolaLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+        const top3HraciKolaLive = unikatniHraciKolaBadgesLive.map(count => {
+            const entries = vsechnyHraciKolaLive.filter(p => p.count === count);
+            const formattedArr = entries.map(e => `${e.nickname} (${e.rounds})`);
+            return { count, names: formattedArr.join(', ') };
+        });
 
     const vsechnyPresne = Object.keys(zebricekMapa).map(uid => ({
         nickname: zebricekMapa[uid].nickname,
