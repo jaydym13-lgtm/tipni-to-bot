@@ -53,9 +53,6 @@ const RAM_CENTRAL_MATCHES = {};
 // 🛡️ PAMĚŤ PRO KONTROLU PRÁZDNÝCH LIG (Chrání TheSportsDB před spamem)
 const LAST_EMPTY_LEAGUE_CHECK = {};
 
-// ⏱️ PAMĚŤ POSLEDNÍHO DOTAZU NA API PRO JEDNOTLIVÉ LIGY (2minutový ochranný štít)
-const LAST_LEAGUE_API_FETCH = {};
-
 // 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
 const RAM_BOT_CONFIG = {
     active: true,         // Hlavní nouzový vypínač bota
@@ -1347,21 +1344,13 @@ const zebricekMapa = {};
 }
 
 let isHeartbeatRunning = false;
-let posledniBehHeartbeatu = 0;
 
 async function providniApiHeartbeat() {
-    const nyniCas = Date.now();
-    if (nyniCas - posledniBehHeartbeatu < 45000) {
-        console.log("⏱️ COOLDOWN: Heartbeat běžel před méně než 45 s. Šetřím TheSportsDB API a přeskakuji dotaz.");
-        return;
-    }
-
     if (isHeartbeatRunning) {
         console.log("⏳ HEARTBEAT ALREADY RUNNING: Přeskakuji paralelní požadavek...");
         return;
     }
     isHeartbeatRunning = true;
-    posledniBehHeartbeatu = nyniCas;
 
     try {
         console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Heartbeat kontrola sportovního API pro ligy: ${SEZNAM_LIG.join(', ')}...`);
@@ -1373,23 +1362,29 @@ async function providniApiHeartbeat() {
         }
 
         const dbKey = process.env.THESPORTSDB_KEY;
+        const nyniMs = Date.now();
 
         let celkovyDosloKStavoveZmene = false;
         let celkovyObsahujeAktivniZapas = false;
         let minRozdilDoZapasu = Infinity;
         let pristiZapasIso = null;
 
+        // 🧠 AUTONOMNÍ ZJIŠTĚNÍ STAVU Z RAM: Zda běží jakýkoliv živý zápas a kdy je nejbližší budoucí výkop
         for (const lName of SEZNAM_LIG) {
             const cZapasy = Object.values(RAM_CENTRAL_MATCHES[lName] || {});
             for (const z of cZapasy) {
-                if (z.vysledek_domaci !== undefined || z.apiStatus === "FINISHED") continue;
+                const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+                if (isFinished) continue;
+
                 const startMs = Date.parse(z.datum);
-                if (!isNaN(startMs)) {
-                    const rozdilMin = (startMs - Date.now()) / (1000 * 60);
-                    if (rozdilMin > 0 && rozdilMin < minRozdilDoZapasu) {
-                        minRozdilDoZapasu = rozdilMin;
-                        pristiZapasIso = z.datum;
-                    }
+                if (isNaN(startMs)) continue;
+                const rozdilMin = (startMs - nyniMs) / (1000 * 60);
+
+                if (z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || rozdilMin <= 0) {
+                    celkovyObsahujeAktivniZapas = true;
+                } else if (rozdilMin > 0 && rozdilMin < minRozdilDoZapasu) {
+                    minRozdilDoZapasu = rozdilMin;
+                    pristiZapasIso = z.datum;
                 }
             }
         }
@@ -1433,16 +1428,7 @@ async function providniApiHeartbeat() {
                         continue;
                     }
 
-                    const minLeagueIntervalMs = (RAM_BOT_CONFIG.liveInterval || 1) * 60 * 1000;
-                    const bylaLigaStazenaNedavno = (Date.now() - (LAST_LEAGUE_API_FETCH[leagueName] || 0) < minLeagueIntervalMs);
-
-                    if (bylaLigaStazenaNedavno) {
-                        console.log(`⏱️ RATE LIMIT SHIELD [${leagueName}]: Od posledního stažení uběhla méně než 1 minuta. Šetřím TheSportsDB.`);
-                        continue;
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    LAST_LEAGUE_API_FETCH[leagueName] = Date.now();
+                    await new Promise(resolve => setTimeout(resolve, 500));
 
                     const sezoneYear = String(SEZONA_ID).replace("_", "-");
                     const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueApiId}&s=${sezoneYear}`, {
