@@ -17,13 +17,12 @@ const LIGY_API_MAPA = {
     "Chance Liga": { id: "4631", provider: "THESPORTSDB" },
     "Premier League": { id: "4328", provider: "THESPORTSDB" },
     "MS ve fotbale": { id: "4429", provider: "THESPORTSDB" },
-    "Liga národů": { id: "4490", provider: "THESPORTSDB" },
     "Tipsport Extraliga": { id: "4923", provider: "THESPORTSDB" },
     "MS v hokeji": { id: "4859", provider: "THESPORTSDB" }
 };
 
 // Seznam lig, které má bot v tomto běhu živě obsluhovat
-const SEZNAM_LIG = (process.env.ACTIVE_LEAGUES || "Chance Liga,Premier League,Liga národů,MS ve fotbale,Tipsport Extraliga,MS v hokeji")
+const SEZNAM_LIG = (process.env.ACTIVE_LEAGUES || "Chance Liga,Premier League,MS ve fotbale,Tipsport Extraliga,MS v hokeji")
     .split(",")
     .map(l => l.trim())
     .filter(Boolean);
