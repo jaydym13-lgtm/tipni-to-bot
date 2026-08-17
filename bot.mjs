@@ -972,7 +972,7 @@ const zebricekMapa = {};
         });
     });
 
-    // 🛡️ DETEKTOR DOHRANÝCH KOL: Kolo je oficiálně uzavřené POUZE tehdy, když jsou dohrané 100% všech jeho zápasů
+    // 🛡️ DETEKTOR DOHRANÝCH A ROZEHRANÝCH KOL
         const kolaZapasyMap = {};
         Object.values(centralMatches).forEach(z => {
             if (z.kolo) {
@@ -983,20 +983,28 @@ const zebricekMapa = {};
         });
 
         const dohranaKolaSet = new Set();
+        const otevrenaKolaSet = new Set();
+
         Object.keys(kolaZapasyMap).forEach(klicKola => {
             const zapasyVKole = kolaZapasyMap[klicKola];
             const vsetkoDohrano = zapasyVKole.length > 0 && zapasyVKole.every(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
             if (vsetkoDohrano) {
                 dohranaKolaSet.add(klicKola);
+            } else {
+                // Kolo je rozehrané, pokud už odstartoval aspoň 1 zápas nebo má zapsaný výsledek
+                const jeRozehrano = zapasyVKole.some(z => z.vysledek_domaci !== undefined || z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || (z.datum && new Date(z.datum) <= new Date()));
+                if (jeRozehrano) {
+                    otevrenaKolaSet.add(klicKola);
+                }
             }
         });
 
-        // 🎯 OSOBNÍ REKORD HRÁČE: Počítá se výhradně ze 100% dohraných kol
+        // 🎯 OSOBNÍ REKORD HRÁČE: Živý přepočet ze všech kol, kde hráč získal body
         Object.keys(zebricekMapa).forEach(uid => {
             let maxPts = 0;
             let maxKolo = '–';
             Object.entries(zebricekMapa[uid].bodyPoKolech).forEach(([klicKola, pts]) => {
-                if (dohranaKolaSet.has(klicKola) && pts > maxPts) {
+                if (pts > maxPts) {
                     maxPts = pts;
                     maxKolo = klicKola;
                 }
@@ -1039,7 +1047,7 @@ const zebricekMapa = {};
             });
         }
 
-        // 👑 KRÁLOVÉ KOL: Oficiální výhry se počítají POUZE z dohraných kol, LIVE výhry i z běžících
+        // 👑 KRÁLOVÉ KOL: Oficiální výhry se udělují POUZE po 100% dohrání kola
         const vyhraVKolePocet = {};
         const vyhraVKolePocetLive = {};
         const vyhranaKolaSeznam = {};
@@ -1069,7 +1077,7 @@ const zebricekMapa = {};
             }
         });
 
-        // 2. LIVE Hráč kola (Všechna kola včetně průběžně rozehraných)
+        // 2. LIVE Hráč kola
         vsechnyKolaKlice.forEach(klicKola => {
             let maxPtsLive = -Infinity;
             Object.keys(zebricekMapa).forEach(uid => {
@@ -1112,69 +1120,65 @@ const zebricekMapa = {};
             return { count, names: formattedArr.join(', ') };
         });
 
-    const vsechnyPresne = Object.keys(zebricekMapa).map(uid => ({
-        nickname: zebricekMapa[uid].nickname,
-        count: zebricekMapa[uid].presneVysledkyCount
-    })).filter(p => p.count > 0);
-    const unikatniPresneBadges = [...new Set(vsechnyPresne.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-    const top3Presne = unikatniPresneBadges.map(count => {
-        const nicks = vsechnyPresne.filter(p => p.count === count).map(p => p.nickname);
-        return { count, names: nicks.join(', ') };
-    });
+        const vsechnyPresne = Object.keys(zebricekMapa).map(uid => ({
+            nickname: zebricekMapa[uid].nickname,
+            count: zebricekMapa[uid].presneVysledkyCount
+        })).filter(p => p.count > 0);
+        const unikatniPresneBadges = [...new Set(vsechnyPresne.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+        const top3Presne = unikatniPresneBadges.map(count => {
+            const nicks = vsechnyPresne.filter(p => p.count === count).map(p => p.nickname);
+            return { count, names: nicks.join(', ') };
+        });
 
-    // 🔥 NEJVÍC PŘESNÝCH TOP ZÁPASŮ (OFICIÁLNÍ)
-    const vsechnyPresneTop = Object.keys(zebricekMapa).map(uid => ({
-        nickname: zebricekMapa[uid].nickname,
-        count: zebricekMapa[uid].presneTopMatchesCount || 0
-    })).filter(p => p.count > 0);
-    const unikatniPresneTopBadges = [...new Set(vsechnyPresneTop.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-    const top3PresneTop = unikatniPresneTopBadges.map(count => {
-        const nicks = vsechnyPresneTop.filter(p => p.count === count).map(p => p.nickname);
-        return { count, names: nicks.join(', ') };
-    });
+        const vsechnyPresneTop = Object.keys(zebricekMapa).map(uid => ({
+            nickname: zebricekMapa[uid].nickname,
+            count: zebricekMapa[uid].presneTopMatchesCount || 0
+        })).filter(p => p.count > 0);
+        const unikatniPresneTopBadges = [...new Set(vsechnyPresneTop.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+        const top3PresneTop = unikatniPresneTopBadges.map(count => {
+            const nicks = vsechnyPresneTop.filter(p => p.count === count).map(p => p.nickname);
+            return { count, names: nicks.join(', ') };
+        });
 
-    const vsechnyKolaZisky = [];
+        // ⚡ REKORDY: Bodové zisky ze VŠECH kol (i rozehraných) soutěží v historickém žebříčku ihned!
+        const vsechnyKolaZisky = [];
         Object.keys(zebricekMapa).forEach(uid => {
             const nickname = zebricekMapa[uid].nickname;
             Object.keys(zebricekMapa[uid].bodyPoKolech).forEach(klicKola => {
-                if (dohranaKolaSet.has(klicKola)) {
-                    const pts = zebricekMapa[uid].bodyPoKolech[klicKola];
-                    if (pts > 0) {
-                        vsechnyKolaZisky.push({ nickname, points: pts, round: klicKola });
-                    }
+                const pts = zebricekMapa[uid].bodyPoKolech[klicKola];
+                if (pts > 0) {
+                    vsechnyKolaZisky.push({ nickname, points: pts, round: klicKola });
                 }
             });
         });
 
-    const unikatniKolaZisky = [...new Set(vsechnyKolaZisky.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
-    const top3Kola = unikatniKolaZisky.map(points => {
-        const entries = vsechnyKolaZisky.filter(p => p.points === points);
-        const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
-        return { points, text: formattedArr.join(', ') };
-    });
+        const unikatniKolaZisky = [...new Set(vsechnyKolaZisky.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+        const top3Kola = unikatniKolaZisky.map(points => {
+            const entries = vsechnyKolaZisky.filter(p => p.points === points);
+            const formattedArr = entries.map(e => `${e.nickname} (${e.round})`);
+            return { points, text: formattedArr.join(', ') };
+        });
 
-    const vsechnyPresneLive = Object.keys(zebricekMapa).map(uid => ({
-        nickname: zebricekMapa[uid].nickname,
-        count: zebricekMapa[uid].presneVysledkyCountLive
-    })).filter(p => p.count > 0);
-    const unikatniPresneBadgesLive = [...new Set(vsechnyPresneLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-    const top3PresneLive = unikatniPresneBadgesLive.map(count => {
-        const nicks = vsechnyPresneLive.filter(p => p.count === count).map(p => p.nickname);
-        return { count, names: nicks.join(', ') };
-    });
+        const vsechnyPresneLive = Object.keys(zebricekMapa).map(uid => ({
+            nickname: zebricekMapa[uid].nickname,
+            count: zebricekMapa[uid].presneVysledkyCountLive
+        })).filter(p => p.count > 0);
+        const unikatniPresneBadgesLive = [...new Set(vsechnyPresneLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+        const top3PresneLive = unikatniPresneBadgesLive.map(count => {
+            const nicks = vsechnyPresneLive.filter(p => p.count === count).map(p => p.nickname);
+            return { count, names: nicks.join(', ') };
+        });
 
-    // 🔥 NEJVÍC PŘESNÝCH TOP ZÁPASŮ (LIVE)
-    const vsechnyPresneTopLive = Object.keys(zebricekMapa).map(uid => ({
-        nickname: zebricekMapa[uid].nickname,
-        count: zebricekMapa[uid].presneTopMatchesCountLive || 0
-    })).filter(p => p.count > 0);
-    const unikatniPresneTopBadgesLive = [...new Set(vsechnyPresneTopLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-    const top3PresneTopLive = unikatniPresneTopBadgesLive.map(count => {
-        const nicks = vsechnyPresneTopLive.filter(p => p.count === count).map(p => p.nickname);
-        return { count, names: nicks.join(', ') };
-    });
+        const vsechnyPresneTopLive = Object.keys(zebricekMapa).map(uid => ({
+            nickname: zebricekMapa[uid].nickname,
+            count: zebricekMapa[uid].presneTopMatchesCountLive || 0
+        })).filter(p => p.count > 0);
+        const unikatniPresneTopBadgesLive = [...new Set(vsechnyPresneTopLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+        const top3PresneTopLive = unikatniPresneTopBadgesLive.map(count => {
+            const nicks = vsechnyPresneTopLive.filter(p => p.count === count).map(p => p.nickname);
+            return { count, names: nicks.join(', ') };
+        });
 
-    // ⚽ NEJVÍC TREFENÝCH SPRÁVNÝCH TENDENCÍ (1, X, 2)
         const vsechnyTendence = Object.keys(zebricekMapa).map(uid => ({
             nickname: zebricekMapa[uid].nickname,
             count: zebricekMapa[uid].spravneTendenceCount || 0
@@ -1212,47 +1216,78 @@ const zebricekMapa = {};
             return { points, text: formattedArr.join(', ') };
         });
 
-        const vsechnyAktualniKolo = Object.keys(zebricekMapa).map(uid => {
-            const stats = zebricekMapa[uid];
-            const pts = stats.bodyPoKolechLive?.[aktivniKolo] !== undefined ? stats.bodyPoKolechLive[aktivniKolo] : (stats.bodyPoKolech[aktivniKolo] || 0);
-            return { nickname: stats.nickname, points: pts };
-        }).filter(p => p.points > 0);
-        const unikatniAktualniZisky = [...new Set(vsechnyAktualniKolo.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
-        const top3AktualniKolo = unikatniAktualniZisky.map(points => {
-            const nicks = vsechnyAktualniKolo.filter(p => p.points === points).map(p => p.nickname);
-            return { points, names: nicks.join(', ') };
+        // 🔥 PŘEHLED VŠECH OTEVŘENÝCH / ROZEHRANÝCH KOL
+        const otevrenaKolaArr = Array.from(otevrenaKolaSet).sort((a, b) => {
+            const numA = parseInt(String(a).replace(/[^0-9]/g, '')) || 0;
+            const numB = parseInt(String(b).replace(/[^0-9]/g, '')) || 0;
+            return numA - numB;
         });
 
-        const zebricekPole = Object.keys(zebricekMapa).map(uid => ({
-            uid: zebricekMapa[uid].uid, email: zebricekMapa[uid].email, nickname: zebricekMapa[uid].nickname,
-            celkemBodu: zebricekMapa[uid].celkemBodu, natipovaneVyhodnocene: zebricekMapa[uid].natipovaneVyhodnocene,
-            nenatipovaneVyhodnocene: zebricekMapa[uid].nenatipovaneVyhodnocene, presneVysledkyCount: zebricekMapa[uid].presneVysledkyCount,
-            presneTopMatchesCount: zebricekMapa[uid].presneTopMatchesCount || 0,
-            spravneTendenceCount: zebricekMapa[uid].spravneTendenceCount || 0,
-            vyhranaKolaCount: vyhraVKolePocet[zebricekMapa[uid].nickname] || 0,
-            perfektniKolaCount: (perfektniKolaSeznam.filter(pk => pk.uid === uid) || []).length,
-            nejviceBoduVKole: zebricekMapa[uid].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[uid].nejviceBoduVKoleNazev || '–',
-            vitezMs: zebricekMapa[uid].vitezMs, nejStrelec: zebricekMapa[uid].nejStrelec,
-            bodyKoloAktualni: zebricekMapa[uid].bodyPoKolech[aktivniKolo] || 0,
-            efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[uid].bodyZapasuCelkem / maxMoznychBoduZapasu) * 100 : 0
-        })).sort((a, b) => {
+        const otevrenaKolaStatistiky = otevrenaKolaArr.map(klicKola => {
+            const vsechnyZiskyVKole = Object.keys(zebricekMapa).map(uid => {
+                const stats = zebricekMapa[uid];
+                const pts = stats.bodyPoKolechLive?.[klicKola] !== undefined ? stats.bodyPoKolechLive[klicKola] : (stats.bodyPoKolech[klicKola] || 0);
+                return { nickname: stats.nickname, points: pts };
+            }).filter(p => p.points > 0);
+
+            const unikatniPts = [...new Set(vsechnyZiskyVKole.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+            const top3 = unikatniPts.map(points => {
+                const nicks = vsechnyZiskyVKole.filter(p => p.points === points).map(p => p.nickname);
+                return { points, names: nicks.join(', ') };
+            });
+
+            return {
+                round: klicKola,
+                top3: top3
+            };
+        });
+
+        const zebricekPole = Object.keys(zebricekMapa).map(uid => {
+            const pOtevrenaKola = otevrenaKolaArr.map(klicKola => ({
+                round: klicKola,
+                points: zebricekMapa[uid].bodyPoKolech[klicKola] || 0
+            })).filter(k => k.points > 0 || otevrenaKolaArr.length === 1);
+
+            return {
+                uid: zebricekMapa[uid].uid, email: zebricekMapa[uid].email, nickname: zebricekMapa[uid].nickname,
+                celkemBodu: zebricekMapa[uid].celkemBodu, natipovaneVyhodnocene: zebricekMapa[uid].natipovaneVyhodnocene,
+                nenatipovaneVyhodnocene: zebricekMapa[uid].nenatipovaneVyhodnocene, presneVysledkyCount: zebricekMapa[uid].presneVysledkyCount,
+                presneTopMatchesCount: zebricekMapa[uid].presneTopMatchesCount || 0,
+                spravneTendenceCount: zebricekMapa[uid].spravneTendenceCount || 0,
+                vyhranaKolaCount: vyhraVKolePocet[zebricekMapa[uid].nickname] || 0,
+                perfektniKolaCount: (perfektniKolaSeznam.filter(pk => pk.uid === uid) || []).length,
+                nejviceBoduVKole: zebricekMapa[uid].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[uid].nejviceBoduVKoleNazev || '–',
+                vitezMs: zebricekMapa[uid].vitezMs, nejStrelec: zebricekMapa[uid].nejStrelec,
+                bodyKoloAktualni: zebricekMapa[uid].bodyPoKolech[aktivniKolo] || 0,
+                otevrenaKola: pOtevrenaKola,
+                efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[uid].bodyZapasuCelkem / maxMoznychBoduZapasu) * 100 : 0
+            };
+        }).sort((a, b) => {
             if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
             return b.presneVysledkyCount - a.presneVysledkyCount;
         });
 
-        const zebricekLivePole = Object.keys(zebricekMapa).map(uid => ({
-            uid: zebricekMapa[uid].uid, email: zebricekMapa[uid].email, nickname: zebricekMapa[uid].nickname,
-            celkemBodu: zebricekMapa[uid].celkemBoduLive, natipovaneVyhodnocene: zebricekMapa[uid].natipovaneVyhodnoceneLive,
-            nenatipovaneVyhodnocene: zebricekMapa[uid].nenatipovaneVyhodnoceneLive, presneVysledkyCount: zebricekMapa[uid].presneVysledkyCountLive,
-            presneTopMatchesCount: zebricekMapa[uid].presneTopMatchesCountLive || zebricekMapa[uid].presneTopMatchesCount || 0,
-            spravneTendenceCount: zebricekMapa[uid].spravneTendenceCountLive || zebricekMapa[uid].spravneTendenceCount || 0,
-            vyhranaKolaCount: vyhraVKolePocetLive[zebricekMapa[uid].nickname] || vyhraVKolePocet[zebricekMapa[uid].nickname] || 0,
-            perfektniKolaCount: (perfektniKolaSeznam.filter(pk => pk.uid === uid) || []).length,
-            nejviceBoduVKole: zebricekMapa[uid].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[uid].nejviceBoduVKoleNazev || '–',
-            vitezMs: zebricekMapa[uid].vitezMs, nejStrelec: zebricekMapa[uid].nejStrelec,
-            bodyKoloAktualni: zebricekMapa[uid].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[uid].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[uid].bodyPoKolech[aktivniKolo] || 0),
-            efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[uid].bodyZapasuCelkemLive / maxMoznychBoduZapasu) * 100 : 0
-        })).sort((a, b) => {
+        const zebricekLivePole = Object.keys(zebricekMapa).map(uid => {
+            const pOtevrenaKolaLive = otevrenaKolaArr.map(klicKola => ({
+                round: klicKola,
+                points: zebricekMapa[uid].bodyPoKolechLive?.[klicKola] !== undefined ? zebricekMapa[uid].bodyPoKolechLive[klicKola] : (zebricekMapa[uid].bodyPoKolech[klicKola] || 0)
+            })).filter(k => k.points > 0 || otevrenaKolaArr.length === 1);
+
+            return {
+                uid: zebricekMapa[uid].uid, email: zebricekMapa[uid].email, nickname: zebricekMapa[uid].nickname,
+                celkemBodu: zebricekMapa[uid].celkemBoduLive, natipovaneVyhodnocene: zebricekMapa[uid].natipovaneVyhodnoceneLive,
+                nenatipovaneVyhodnocene: zebricekMapa[uid].nenatipovaneVyhodnoceneLive, presneVysledkyCount: zebricekMapa[uid].presneVysledkyCountLive,
+                presneTopMatchesCount: zebricekMapa[uid].presneTopMatchesCountLive || zebricekMapa[uid].presneTopMatchesCount || 0,
+                spravneTendenceCount: zebricekMapa[uid].spravneTendenceCountLive || zebricekMapa[uid].spravneTendenceCount || 0,
+                vyhranaKolaCount: vyhraVKolePocetLive[zebricekMapa[uid].nickname] || vyhraVKolePocet[zebricekMapa[uid].nickname] || 0,
+                perfektniKolaCount: (perfektniKolaSeznam.filter(pk => pk.uid === uid) || []).length,
+                nejviceBoduVKole: zebricekMapa[uid].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[uid].nejviceBoduVKoleNazev || '–',
+                vitezMs: zebricekMapa[uid].vitezMs, nejStrelec: zebricekMapa[uid].nejStrelec,
+                bodyKoloAktualni: zebricekMapa[uid].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[uid].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[uid].bodyPoKolech[aktivniKolo] || 0),
+                otevrenaKola: pOtevrenaKolaLive,
+                efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[uid].bodyZapasuCelkemLive / maxMoznychBoduZapasu) * 100 : 0
+            };
+        }).sort((a, b) => {
             if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
             return b.presneVysledkyCount - a.presneVysledkyCount;
         });
@@ -1292,7 +1327,8 @@ const zebricekMapa = {};
             top3PresneLive: top3PresneLive,
             top3PresneTopLive: top3PresneTopLive,
             top3KolaLive: top3KolaLive,
-            top3AktualniKolo: top3AktualniKolo,
+            otevrenaKolaStatistiky: otevrenaKolaStatistiky,
+            otevrenaKolaSeznam: otevrenaKolaArr,
             aktivniKoloText: aktivniKolo,
             aktualizovano: timestampNow
         };
