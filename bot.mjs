@@ -1587,6 +1587,28 @@ async function providniApiHeartbeat() {
     }
 }
 
+// 🕒 AUTOMATICKÝ PŘEVODNÍK ČASU PRO EUROPE/PRAGUE (LETNÍ I ZIMNÍ ČAS)
+function parsujZapasDatumDoIso(item) {
+    const datum = item.dateEvent;
+    const cas = (item.strTime || "00:00:00").substring(0, 8);
+    
+    if (!datum) return new Date().toISOString();
+
+    const localIso = `${datum}T${cas}`;
+    
+    // Zjistíme přesný offset Prahy pro dané datum (+02:00 v létě, +01:00 v zimě)
+    const tempDate = new Date(`${localIso}Z`);
+    const pragueOffset = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Europe/Prague',
+        timeZoneName: 'longOffset'
+    }).format(tempDate);
+
+    const match = pragueOffset.match(/GMT([+-]\d{2}:\d{2})/);
+    const offset = match ? match[1] : "+01:00";
+
+    return new Date(`${localIso}${offset}`).toISOString();
+}
+
 // 📅 HLOUBKOVÝ KALENDÁŘ: Běží 3x denně (3:00, 9:00, 14:00) – stahuje a mapuje kompletní rozpis všech lig
 async function synchronizujRozpisyVsechLig() {
     console.log("=========================================================================");
@@ -1638,14 +1660,7 @@ async function synchronizujRozpisyVsechLig() {
                 const roundNum = parseInt(item.intRound) || 1;
                 const isPlayoff = item.strStage && item.strStage !== "GROUP_STAGE" && item.strStage !== "REGULAR_SEASON";
 
-                let matchIsoDate = new Date().toISOString();
-                let rawStr = item.strTimestamp || (item.dateEvent ? `${item.dateEvent}T${item.strTime || "00:00:00"}` : null);
-                if (rawStr) {
-                    rawStr = rawStr.replace(" ", "T");
-                    if (!rawStr.endsWith("Z") && !rawStr.includes("+") && !rawStr.includes("-")) rawStr += "Z";
-                    const parsedDate = new Date(rawStr);
-                    if (!isNaN(parsedDate.getTime())) matchIsoDate = parsedDate.toISOString();
-                }
+                const matchIsoDate = parsujZapasDatumDoIso(item);
 
                 let spravneKolo = `${roundNum}. kolo`;
                 const stary = RAM_CENTRAL_MATCHES[leagueName]?.[apiId];
