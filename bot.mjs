@@ -343,7 +343,7 @@ function zapniReaktivniSluchatka() {
                 RAM_USERS_TIPS[uid] = sData.souteze || {};
             }
         });
-        planujRekonstrukciAgregatu();
+        planujRekonstrukciAgregatu(true);
     }, err => console.error("❌ Chyba streamu sezón:", err));
 
     SEZNAM_LIG.forEach(leagueName => {
@@ -1348,8 +1348,9 @@ const zebricekMapa = {};
         await uploadToR2(leagueName, "rozpis.json", rozpisJson);
 
         if (forceWriteHistory) {
-            const historiePromises = [];
+            const uploadPromises = [];
 
+            // 1. 📜 Generování historie tipů každého hráče
             for (const uid of Object.keys(RAM_USERS_PROFILES)) {
                 const uSouteze = RAM_USERS_TIPS[uid] || {};
                 const hracovyTipyVsechny = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
@@ -1357,18 +1358,50 @@ const zebricekMapa = {};
 
                 Object.keys(hracovyTipyVsechny).forEach(mId => {
                     const zapas = centralMatches[mId];
-                    if (zapas && new Date(zapas.datum) <= new Date()) {
+                    const jeOdemceny = zapas && (new Date(zapas.datum) <= new Date() || zapas.vysledek_domaci !== undefined || zapas.apiStatus === "IN_PLAY" || zapas.apiStatus === "FINISHED");
+                    if (jeOdemceny) {
                         hracovyTipyOdemcene[mId] = hracovyTipyVsechny[mId];
                     }
                 });
 
                 const historieJson = { mapaTipu: hracovyTipyOdemcene, vytvoreno: timestampNow };
-                const uploadPromise = uploadToR2(leagueName, `historie_hrace_${uid}.json`, historieJson);
-                historiePromises.push(uploadPromise);
+                uploadPromises.push(uploadToR2(leagueName, `historie_hrace_${uid}.json`, historieJson));
             }
 
-            if (historiePromises.length > 0) {
-                await Promise.all(historiePromises);
+            // 2. 👁️ Generování špehovacích souborů pro všechny odstartované a odehrané zápasy
+            Object.keys(centralMatches).forEach(mId => {
+                const zapas = centralMatches[mId];
+                const jeOdemceny = zapas && (new Date(zapas.datum) <= new Date() || zapas.vysledek_domaci !== undefined || zapas.apiStatus === "IN_PLAY" || zapas.apiStatus === "FINISHED");
+
+                if (jeOdemceny) {
+                    const tipyProZapasPole = [];
+                    Object.keys(RAM_USERS_PROFILES).forEach(uid => {
+                        const p = RAM_USERS_PROFILES[uid];
+                        if (!p.leagues || !p.leagues.includes(leagueName)) return;
+
+                        const uSouteze = RAM_USERS_TIPS[uid] || {};
+                        const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
+                        const uTip = uTips[mId];
+
+                        if (uTip && uTip.tip_domaci !== undefined && uTip.tip_domaci !== null && String(uTip.tip_domaci).trim() !== '') {
+                            tipyProZapasPole.push({
+                                uid: uid,
+                                userEmail: p.email,
+                                nickname: p.nickname,
+                                tip_domaci: parseInt(uTip.tip_domaci),
+                                tip_hoste: parseInt(uTip.tip_hoste),
+                                postup: uTip.postup || ''
+                            });
+                        }
+                    });
+
+                    const spyJson = { tipy: tipyProZapasPole, aktualizovano: timestampNow };
+                    uploadPromises.push(uploadToR2(leagueName, `spy_zapas_${mId}.json`, spyJson));
+                }
+            });
+
+            if (uploadPromises.length > 0) {
+                await Promise.all(uploadPromises);
             }
         }
 
