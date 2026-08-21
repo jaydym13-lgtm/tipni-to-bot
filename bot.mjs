@@ -1749,6 +1749,12 @@ async function startEnterpriseApplication() {
 
     await hydratujDataZFirestore();
     zapniReaktivniSluchatka();
+
+    // ⏱️ AUTONOMNÍ VNITŘNÍ SMYČKA: Bot provádí kontrolu každých 60 sekund sám od sebe
+    console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím interní 60s smyčku pro kontrolu live výsledků...");
+    setInterval(() => {
+        providniApiHeartbeat().catch(err => console.error("❌ Chyba interního Heartbeatu:", err));
+    }, 60000);
 }
 
 startEnterpriseApplication();
