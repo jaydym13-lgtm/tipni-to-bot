@@ -1046,18 +1046,10 @@ const zebricekMapa = {};
             });
         }
 
-        // 👑 KRÁLOVÉ KOL: Oficiální výhry se udělují POUZE po 100% dohrání kola
+        // 👑 KRÁLOVÉ KOL: Titul "Hráč kola" se uděluje VÝHRADNĚ po 100% dohrání všech zápasů kola
         const vyhraVKolePocet = {};
-        const vyhraVKolePocetLive = {};
         const vyhranaKolaSeznam = {};
-        const vyhranaKolaSeznamLive = {};
 
-        const vsechnyKolaKlice = new Set();
-        Object.keys(zebricekMapa).forEach(uid => {
-            Object.keys(zebricekMapa[uid].bodyPoKolechLive || {}).forEach(k => vsechnyKolaKlice.add(k));
-        });
-
-        // 1. Oficiální Hráč kola (Pouze dohraná kola)
         dohranaKolaSet.forEach(klicKola => {
             let maxPts = -Infinity;
             Object.keys(zebricekMapa).forEach(uid => {
@@ -1076,24 +1068,9 @@ const zebricekMapa = {};
             }
         });
 
-        // 2. LIVE Hráč kola
-        vsechnyKolaKlice.forEach(klicKola => {
-            let maxPtsLive = -Infinity;
-            Object.keys(zebricekMapa).forEach(uid => {
-                const pts = zebricekMapa[uid].bodyPoKolechLive?.[klicKola];
-                if (pts !== undefined && pts > maxPtsLive && pts > 0) maxPtsLive = pts;
-            });
-            if (maxPtsLive > 0) {
-                Object.keys(zebricekMapa).forEach(uid => {
-                    if (zebricekMapa[uid].bodyPoKolechLive?.[klicKola] === maxPtsLive) {
-                        const nick = zebricekMapa[uid].nickname;
-                        vyhraVKolePocetLive[nick] = (vyhraVKolePocetLive[nick] || 0) + 1;
-                        if (!vyhranaKolaSeznamLive[nick]) vyhranaKolaSeznamLive[nick] = [];
-                        vyhranaKolaSeznamLive[nick].push(klicKola);
-                    }
-                });
-            }
-        });
+        // LIVE data i oficiální data sdílí stejný zámek – během rozehraného kola se titul nepředává
+        const vyhraVKolePocetLive = { ...vyhraVKolePocet };
+        const vyhranaKolaSeznamLive = { ...vyhranaKolaSeznam };
 
         const vsechnyHraciKola = Object.keys(vyhraVKolePocet).map(nick => ({
             nickname: nick,
@@ -1107,17 +1084,7 @@ const zebricekMapa = {};
             return { count, names: formattedArr.join(', ') };
         });
 
-        const vsechnyHraciKolaLive = Object.keys(vyhraVKolePocetLive).map(nick => ({
-            nickname: nick,
-            count: vyhraVKolePocetLive[nick],
-            rounds: (vyhranaKolaSeznamLive[nick] || []).join(', ')
-        })).filter(p => p.count > 0);
-        const unikatniHraciKolaBadgesLive = [...new Set(vsechnyHraciKolaLive.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
-        const top3HraciKolaLive = unikatniHraciKolaBadgesLive.map(count => {
-            const entries = vsechnyHraciKolaLive.filter(p => p.count === count);
-            const formattedArr = entries.map(e => `${e.nickname} (${e.rounds})`);
-            return { count, names: formattedArr.join(', ') };
-        });
+        const top3HraciKolaLive = [...top3HraciKola];
 
         const vsechnyPresne = Object.keys(zebricekMapa).map(uid => ({
             nickname: zebricekMapa[uid].nickname,
