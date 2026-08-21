@@ -1450,179 +1450,173 @@ const zebricekMapa = {};
 
 let isHeartbeatRunning = false;
 
-// 🔴 LIVE TRACKER: Běží každou 1 minutu během zápasů – stahuje VÝHRADNĚ ligy s aktivní hrou
+// =========================================================================
+// 🚀 ENTERPRISE LIVE ENGINE: DETERMINISTICKÝ STATE MACHINE A BATCH INGESTION
+// =========================================================================
 async function providniApiHeartbeat() {
-    if (isHeartbeatRunning) {
-        console.log("⏳ HEARTBEAT ALREADY RUNNING: Přeskakuji paralelní požadavek...");
-        return;
-    }
+    if (isHeartbeatRunning) return;
     isHeartbeatRunning = true;
 
     try {
-        if (!RAM_BOT_CONFIG.active) {
-            console.log("⛔ BOT MANUÁLNĚ VYPNUT: Ovládací panel hlásí force_stop. Spím...");
-            return;
-        }
+        if (!RAM_BOT_CONFIG.active) return;
 
         const dbKey = process.env.THESPORTSDB_KEY;
-        const nyniMs = Date.now();
+        if (!dbKey) return;
+
         const nyni = new Date();
+        const nyniMs = nyni.getTime();
+        const pragueDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(nyni);
 
-        let celkovyDosloKStavoveZmene = false;
-        let celkovyObsahujeAktivniZapas = false;
-        let minRozdilDoZapasu = Infinity;
+        // 1. ZJISTÍME, KTERÉ SPORTY A LIGY MAJÍ DNES NEBO PRÁVĚ TEĎ ZÁPAS
+        const aktivniSporty = new Set();
+        const ligyDnesNaSklade = new Set();
+        let globalneBeziZapas = false;
 
-        // 🧠 AUTONOMNÍ SKEN RAM: Zjistíme stav napříč všemi ligami přímo z paměti
-        for (const lName of SEZNAM_LIG) {
-            const cZapasy = Object.values(RAM_CENTRAL_MATCHES[lName] || {});
-            for (const z of cZapasy) {
+        for (const leagueName of SEZNAM_LIG) {
+            const centralZapasy = Object.values(RAM_CENTRAL_MATCHES[leagueName] || {});
+            const isHockey = leagueName.includes("Extraliga") || leagueName.includes("hokej");
+            const sportKey = isHockey ? "Ice_Hockey" : "Soccer";
+
+            for (const z of centralZapasy) {
                 const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
                 if (isFinished) continue;
 
                 const startMs = Date.parse(z.datum);
                 if (isNaN(startMs)) continue;
-                const rozdilMin = (startMs - nyniMs) / (1000 * 60);
 
-                if (z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || rozdilMin <= 0) {
-                    celkovyObsahujeAktivniZapas = true;
-                } else if (rozdilMin > 0 && rozdilMin < minRozdilDoZapasu) {
-                    minRozdilDoZapasu = rozdilMin;
+                // Zápas je dnes, běží live, nebo nastal čas výkopu
+                const jeDnes = z.datum.startsWith(pragueDate);
+                const beziTed = z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || nyniMs >= startMs;
+
+                if (beziTed || jeDnes) {
+                    aktivniSporty.add(sportKey);
+                    ligyDnesNaSklade.add(leagueName);
+                    if (beziTed) globalneBeziZapas = true;
                 }
             }
         }
 
-        console.log(`[${new Date().toLocaleTimeString()}] ⏱️ Live kontrola skóre pro aktivní soutěže...`);
+        // Pokud se dnes nic nehraje a nic neběží, šetříme API
+        if (aktivniSporty.size === 0 && ligyDnesNaSklade.size === 0) {
+            console.log(`[${nyni.toLocaleTimeString('cs-CZ')}] 💤 STATUS: Dnes žádné aktivní ani nadcházející zápasy.`);
+            return;
+        }
+
+        console.log(`[${nyni.toLocaleTimeString('cs-CZ')}] ⏱️ Live kontrola skóre (Aktivní sporty: ${Array.from(aktivniSporty).join(', ')})...`);
+
+        const fetchHeaders = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*"
+        };
+
+        // 2. PARALELNÍ BATCH STAŽENÍ (Max 2-4 requesty pro celý server dohromady!)
+        const apiSlipy = [];
+
+        // A) Globální livescore podle aktivních sportů
+        for (const sport of aktivniSporty) {
+            const url = `https://www.thesportsdb.com/api/v1/json/${dbKey}/livescore.php?s=${sport}`;
+            apiSlipy.push(fetch(url, { headers: fetchHeaders }).then(r => r.ok ? r.json() : null).catch(() => null));
+        }
+
+        // B) Denní souhrn pro ligy, které dnes hrají (pro dohrané FT výsledky)
+        for (const lName of ligyDnesNaSklade) {
+            const lConfig = LIGY_API_MAPA[lName];
+            if (lConfig && lConfig.id) {
+                const url = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsday.php?d=${pragueDate}&l=${lConfig.id}`;
+                apiSlipy.push(fetch(url, { headers: fetchHeaders }).then(r => r.ok ? r.json() : null).catch(() => null));
+            }
+        }
+
+        const rawResponses = await Promise.all(apiSlipy);
+
+        // 3. UNIFIKOVANÁ INGESTION MAPA UDÁLOSTÍ
+        const unifiedEventsMap = new Map();
+        rawResponses.forEach(res => {
+            if (res && Array.isArray(res.events)) {
+                res.events.forEach(ev => {
+                    if (ev && ev.idEvent) {
+                        unifiedEventsMap.set(String(ev.idEvent), ev);
+                    }
+                });
+            }
+        });
+
+        // 4. ATOMICKÉ VYHODNOCENÍ STAVŮ NAPŘÍČ VŠEMI LIGAMI
+        const zmeneneLigySet = new Set();
 
         for (const leagueName of SEZNAM_LIG) {
-            const leagueConfig = LIGY_API_MAPA[leagueName] || { id: "WC", provider: "MANUAL" };
-            if (leagueConfig.provider === "MANUAL") continue;
+            const centralZapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
 
-            const centralneZapasyLigy = Object.values(RAM_CENTRAL_MATCHES[leagueName] || {});
+            for (const [matchId, stary] of Object.entries(centralZapasy)) {
+                const startZapasuMs = Date.parse(stary.datum);
+                const isPastKickoff = !isNaN(startZapasuMs) && (nyniMs >= startZapasuMs);
+                const item = unifiedEventsMap.get(matchId);
 
-            // 🎯 SENIOR BRÁNA: Saháme na API POUZE pokud se v lize reálně hraje nebo je T-10 min před výkopem
-            const maAktivniZapas = centralneZapasyLigy.some(z => {
-                const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
-                if (isFinished) return false;
-                const startMs = Date.parse(z.datum);
-                if (isNaN(startMs)) return false;
-                const rozdilMinut = (startMs - nyniMs) / (1000 * 60);
-                return z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || rozdilMinut <= 10 || (nyniMs >= startMs);
-            });
-
-            if (!maAktivniZapas) {
-                continue;
-            }
-
-            try {
-                if (!dbKey) continue;
-
-                await new Promise(resolve => setTimeout(resolve, 300));
-
-                const fetchHeaders = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                    "Accept": "application/json, text/plain, */*"
-                };
-
-                // 🎯 PŘÍMÝ DOTAZ NA KONKRÉTNÍ ZÁPASY: Eliminuje CDN cache a hromadné filtry
-                const aktivniZapasyIds = Object.keys(RAM_CENTRAL_MATCHES[leagueName] || {}).filter(mId => {
-                    const z = RAM_CENTRAL_MATCHES[leagueName][mId];
-                    const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
-                    return !isFinished;
-                });
-
-                const rawItems = [];
-                for (const matchId of aktivniZapasyIds) {
-                    const directUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/lookupevent.php?id=${matchId}`;
-                    try {
-                        const resDirect = await fetch(directUrl, { headers: fetchHeaders });
-                        if (resDirect.ok) {
-                            const dData = await resDirect.json();
-                            if (dData && dData.events && dData.events.length > 0) {
-                                const ev = dData.events[0];
-                                rawItems.push(ev);
-                                console.log(`📡 PŘÍMÁ DATA [${leagueName} - ${matchId}]: status="${ev.strStatus}", skóre=${ev.intHomeScore}:${ev.intAwayScore}, progress="${ev.strProgress || ''}"`);
-                            }
-                        }
-                    } catch (errDirect) {
-                        console.error(`Chyba přímého dotazu pro ${matchId}:`, errDirect.message);
-                    }
+                // 🔒 LOCK T-0: Přesně v čase výkopu zamknout tipy a vygenerovat spy soubory
+                if (isPastKickoff && !stary.spyUploaded) {
+                    console.log(`🔒 LOCK T-0 [${leagueName}]: Výkop zápasu ${stary.domaci} – ${stary.hoste}. Zmrazuji tipy!`);
+                    stary.spyUploaded = true;
+                    zmeneneLigySet.add(leagueName);
                 }
 
-                for (const item of rawItems) {
-                    const apiId = String(item.idEvent);
-                    const stary = RAM_CENTRAL_MATCHES[leagueName]?.[apiId];
-                    if (!stary) continue;
+                if (!item) continue;
 
-                    const statusRaw = String(item.strStatus || "").trim().toUpperCase();
-                    const isFinished = statusRaw === "MATCH FINISHED" || statusRaw === "FT" || statusRaw === "AOT" || statusRaw === "AP" || statusRaw === "FINISHED" || statusRaw === "FULL TIME";
-                    const isLiveKeyword = statusRaw === "IN PROGRESS" || statusRaw === "1H" || statusRaw === "2H" || statusRaw === "HT" || statusRaw === "LIVE" || statusRaw.includes("'");
-                    const hasValidScore = item.intHomeScore !== null && item.intHomeScore !== undefined && String(item.intHomeScore).trim() !== "" &&
-                                          item.intAwayScore !== null && item.intAwayScore !== undefined && String(item.intAwayScore).trim() !== "";
+                // PARSOVÁNÍ STAVU Z API
+                const statusRaw = String(item.strStatus || "").trim().toUpperCase();
+                const isFinished = ["MATCH FINISHED", "FT", "AOT", "AP", "FINISHED", "FULL TIME"].includes(statusRaw);
+                const isLiveKeyword = ["IN PROGRESS", "1H", "2H", "HT", "LIVE", "ET", "P"].includes(statusRaw) || statusRaw.includes("'");
+                
+                const hasValidScore = item.intHomeScore !== null && item.intHomeScore !== undefined && String(item.intHomeScore).trim() !== "" &&
+                                      item.intAwayScore !== null && item.intAwayScore !== undefined && String(item.intAwayScore).trim() !== "";
 
-                    const startZapasuMs = Date.parse(stary.datum);
-                    const isPastKickoff = !isNaN(startZapasuMs) && (nyniMs >= startZapasuMs);
-                    const isLive = !isFinished && (isLiveKeyword || (hasValidScore && isPastKickoff));
-                    const statusStr = isFinished ? "FINISHED" : (isLive ? "IN_PLAY" : "SCHEDULED");
+                let golyDomaci = hasValidScore ? parseInt(item.intHomeScore, 10) : undefined;
+                let golyHoste = hasValidScore ? parseInt(item.intAwayScore, 10) : undefined;
 
-                    const golyDomaci = (isFinished || isLive || isPastKickoff) && hasValidScore ? parseInt(item.intHomeScore, 10) : undefined;
-                    const golyHoste = (isFinished || isLive || isPastKickoff) && hasValidScore ? parseInt(item.intAwayScore, 10) : undefined;
-
-                    let spyJizOdeslano = stary.spyUploaded || false;
-                    if (statusStr !== "FINISHED" && isPastKickoff && !spyJizOdeslano) {
-                        console.log(`🔒 LOCK T-0 [${leagueName}]: Výkop zápasu ${stary.domaci} – ${stary.hoste}. Zmrazuji tipy!`);
-                        const tipyProZapasPole = [];
-                        Object.keys(RAM_USERS_PROFILES).forEach(uid => {
-                            const p = RAM_USERS_PROFILES[uid];
-                            if (!p.leagues || !p.leagues.includes(leagueName)) return;
-                            const uSouteze = RAM_USERS_TIPS[uid] || {};
-                            const ligaKlic = String(leagueName).replace(/ /g, "_");
-                            const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
-                            const uTip = uTips[apiId];
-                            if (uTip && uTip.tip_domaci !== undefined) {
-                                tipyProZapasPole.push({
-                                    uid: uid, userEmail: p.email, nickname: p.nickname,
-                                    tip_domaci: parseInt(uTip.tip_domaci), tip_hoste: parseInt(uTip.tip_hoste), postup: uTip.postup || ''
-                                });
-                            }
-                        });
-                        await uploadToR2(leagueName, `spy_zapas_${apiId}.json`, { tipy: tipyProZapasPole, aktualizovano: nyni.toISOString() });
-                        spyJizOdeslano = true;
-                        stary.spyUploaded = true;
-                        celkovyDosloKStavoveZmene = leagueName;
-                    }
-
-                    const zmenilSeStav = (stary.apiStatus !== statusStr) || (stary.vysledek_domaci !== golyDomaci) || (stary.vysledek_hoste !== golyHoste);
-                    if (zmenilSeStav) {
-                        console.log(`⚽ LIVE SKÓRE [${leagueName}]: ${stary.domaci} ${golyDomaci ?? '-'} : ${golyHoste ?? '-'} ${stary.hoste} (${statusStr})`);
-                        stary.apiStatus = statusStr;
-                        stary.vysledek_domaci = golyDomaci;
-                        stary.vysledek_hoste = golyHoste;
-                        celkovyDosloKStavoveZmene = leagueName;
-
-                        const syncPayload = { apiStatus: statusStr };
-                        if (golyDomaci !== undefined) syncPayload.vysledek_domaci = golyDomaci;
-                        if (golyHoste !== undefined) syncPayload.vysledek_hoste = golyHoste;
-
-                        db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").doc(apiId).set(syncPayload, { merge: true })
-                            .catch(e => console.error(`❌ Chyba sync skóre [${leagueName}]:`, e));
-                    }
+                let novyStatus = stary.apiStatus || "SCHEDULED";
+                if (isFinished) {
+                    novyStatus = "FINISHED";
+                } else if (isLiveKeyword || (hasValidScore && isPastKickoff)) {
+                    novyStatus = "IN_PLAY";
                 }
-            } catch (err) {
-                console.error(`❌ Chyba při live čtení pro ${leagueName}:`, err);
+
+                // DETEKCE DIFERENCE (Skóre nebo Stav)
+                const skoreSeZmenilo = (stary.vysledek_domaci !== golyDomaci) || (stary.vysledek_hoste !== golyHoste);
+                const statusSeZmenil = (stary.apiStatus !== novyStatus);
+
+                if (skoreSeZmenilo || statusSeZmenil) {
+                    console.log(`⚽ LIVE SYNCHRO [${leagueName}]: ${stary.domaci} ${golyDomaci ?? '-'} : ${golyHoste ?? '-'} ${stary.hoste} | Status: ${novyStatus}`);
+
+                    stary.apiStatus = novyStatus;
+                    stary.vysledek_domaci = golyDomaci;
+                    stary.vysledek_hoste = golyHoste;
+
+                    zmeneneLigySet.add(leagueName);
+
+                    // Paralelní Firestore zápis
+                    const syncPayload = { apiStatus: novyStatus };
+                    if (golyDomaci !== undefined) syncPayload.vysledek_domaci = golyDomaci;
+                    if (golyHoste !== undefined) syncPayload.vysledek_hoste = golyHoste;
+
+                    db.collection("ligy").doc(leagueName)
+                      .collection("sezony").doc(SEZONA_ID)
+                      .collection("zapasy").doc(matchId)
+                      .set(syncPayload, { merge: true })
+                      .catch(e => console.error(`❌ Firestore Sync Error [${leagueName} - ${matchId}]:`, e.message));
+                }
             }
         }
 
-        if (celkovyDosloKStavoveZmene) {
-            await rekonstruujAgregatyProLigu(celkovyDosloKStavoveZmene, true);
+        // 5. DISTRIBUCE NA R2 A FIRESTORE PULS POUZE PRO DOTČENÉ LIGY
+        for (const lName of zmeneneLigySet) {
+            await rekonstruujAgregatyProLigu(lName, true);
         }
 
-        if (celkovyObsahujeAktivniZapas) {
-            console.log(`🚀 STATUS: Zápasy aktivně běží.`);
-        } else {
-            console.log(`💤 STATUS: Žádné aktivní zápasy. Nejbližší výkop za ${Math.round(minRozdilDoZapasu)} min.`);
+        if (globalneBeziZapas) {
+            console.log(`🚀 STATUS: Zápasy aktivně běží v reálném čase.`);
         }
+
     } catch (err) {
-        console.error(`❌ Chyba v live smyčce:`, err);
+        console.error(`❌ Kritická chyba v Live Engine:`, err);
     } finally {
         isHeartbeatRunning = false;
     }
