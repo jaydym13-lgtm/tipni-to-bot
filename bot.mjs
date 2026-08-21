@@ -1516,29 +1516,31 @@ async function providniApiHeartbeat() {
             try {
                 if (!dbKey) continue;
 
-                await new Promise(resolve => setTimeout(resolve, 500));
-                // ⚡ ODLEHČENÝ LIVE DOTAZ: Taháme pouze dnešní zápasy místo celé sezóny (šetří 95 % zátěže)
+                await new Promise(resolve => setTimeout(resolve, 300));
+
+                // ⚡ PARALELNÍ PLACENÝ DOTAZ: Spojujeme živý livescore.php (0s zpoždění) + eventsday.php (dohrané zápasy)
                 const pragueDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date());
-                const targetApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsday.php?d=${pragueDate}&l=${leagueConfig.id}`;
+                const liveApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/livescore.php?l=${leagueConfig.id}`;
+                const dayApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsday.php?d=${pragueDate}&l=${leagueConfig.id}`;
+
                 const fetchHeaders = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
                     "Accept": "application/json, text/plain, */*"
                 };
 
-                let response = null;
-                for (let pokus = 1; pokus <= 3; pokus++) {
-                    response = await fetch(targetApiUrl, { headers: fetchHeaders });
-                    if (response.ok) break;
+                const [resLive, resDay] = await Promise.all([
+                    fetch(liveApiUrl, { headers: fetchHeaders }).catch(() => null),
+                    fetch(dayApiUrl, { headers: fetchHeaders }).catch(() => null)
+                ]);
 
-                    if (pokus < 3) {
-                        console.log(`⚠️ TheSportsDB [${leagueName}] odpověděla statusem ${response.status} (pokus ${pokus}/3). Záchranný pokus za 7 s...`);
-                        await new Promise(resolve => setTimeout(resolve, 7000));
-                    }
-                }
+                const liveJson = (resLive && resLive.ok) ? await resLive.json().catch(() => null) : null;
+                const dayJson = (resDay && resDay.ok) ? await resDay.json().catch(() => null) : null;
 
-                if (!response || !response.ok) throw new Error(`TheSportsDB error (${leagueName}): ${response ? response.status : 'No response'}`);
-                const apiData = await response.json();
-                const rawItems = apiData.events || [];
+                // 🧠 BLESKOVÁ SYNCHRONIZACE: Živé skóre z livescore.php má přednost před statickým eventsday.php
+                const eventsMap = new Map();
+                (dayJson?.events || []).forEach(ev => eventsMap.set(String(ev.idEvent), ev));
+                (liveJson?.events || []).forEach(ev => eventsMap.set(String(ev.idEvent), ev));
+                const rawItems = Array.from(eventsMap.values());
 
                 for (const item of rawItems) {
                     const apiId = String(item.idEvent);
