@@ -1518,33 +1518,35 @@ async function providniApiHeartbeat() {
 
                 await new Promise(resolve => setTimeout(resolve, 300));
 
-                const isHockey = leagueName.includes("Extraliga") || leagueName.includes("hokej");
-                const sportParam = isHockey ? "Ice_Hockey" : "Soccer";
-                const pragueDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date());
-
-                // ⚡ TheSportsDB livescore vyžaduje parametr ?s=Sport (Soccer / Ice_Hockey)
-                const liveApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/livescore.php?s=${sportParam}`;
-                const dayApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsday.php?d=${pragueDate}&l=${leagueConfig.id}`;
-
                 const fetchHeaders = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
                     "Accept": "application/json, text/plain, */*"
                 };
 
-                const [resLive, resDay] = await Promise.all([
-                    fetch(liveApiUrl, { headers: fetchHeaders }).catch(e => { console.error(`Live fetch error:`, e.message); return null; }),
-                    fetch(dayApiUrl, { headers: fetchHeaders }).catch(e => { console.error(`Day fetch error:`, e.message); return null; })
-                ]);
+                // 🎯 PŘÍMÝ DOTAZ NA KONKRÉTNÍ ZÁPASY: Eliminuje CDN cache a hromadné filtry
+                const aktivniZapasyIds = Object.keys(RAM_CENTRAL_MATCHES[leagueName] || {}).filter(mId => {
+                    const z = RAM_CENTRAL_MATCHES[leagueName][mId];
+                    const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+                    return !isFinished;
+                });
 
-                const liveJson = (resLive && resLive.ok) ? await resLive.json().catch(() => null) : null;
-                const dayJson = (resDay && resDay.ok) ? await resDay.json().catch(() => null) : null;
-
-                const eventsMap = new Map();
-                (dayJson?.events || []).forEach(ev => eventsMap.set(String(ev.idEvent), ev));
-                (liveJson?.events || []).forEach(ev => eventsMap.set(String(ev.idEvent), ev));
-                const rawItems = Array.from(eventsMap.values());
-
-                console.log(`🔍 API STATS [${leagueName}]: Načteno ${rawItems.length} zápasů (Live: ${(liveJson?.events || []).length}, Day: ${(dayJson?.events || []).length})`);
+                const rawItems = [];
+                for (const matchId of aktivniZapasyIds) {
+                    const directUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/lookupevent.php?id=${matchId}`;
+                    try {
+                        const resDirect = await fetch(directUrl, { headers: fetchHeaders });
+                        if (resDirect.ok) {
+                            const dData = await resDirect.json();
+                            if (dData && dData.events && dData.events.length > 0) {
+                                const ev = dData.events[0];
+                                rawItems.push(ev);
+                                console.log(`📡 PŘÍMÁ DATA [${leagueName} - ${matchId}]: status="${ev.strStatus}", skóre=${ev.intHomeScore}:${ev.intAwayScore}, progress="${ev.strProgress || ''}"`);
+                            }
+                        }
+                    } catch (errDirect) {
+                        console.error(`Chyba přímého dotazu pro ${matchId}:`, errDirect.message);
+                    }
+                }
 
                 for (const item of rawItems) {
                     const apiId = String(item.idEvent);
