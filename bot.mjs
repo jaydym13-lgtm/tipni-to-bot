@@ -1518,9 +1518,12 @@ async function providniApiHeartbeat() {
 
                 await new Promise(resolve => setTimeout(resolve, 300));
 
-                // ⚡ PARALELNÍ PLACENÝ DOTAZ: Spojujeme živý livescore.php (0s zpoždění) + eventsday.php (dohrané zápasy)
+                const isHockey = leagueName.includes("Extraliga") || leagueName.includes("hokej");
+                const sportParam = isHockey ? "Ice_Hockey" : "Soccer";
                 const pragueDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date());
-                const liveApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/livescore.php?l=${leagueConfig.id}`;
+
+                // ⚡ TheSportsDB livescore vyžaduje parametr ?s=Sport (Soccer / Ice_Hockey)
+                const liveApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/livescore.php?s=${sportParam}`;
                 const dayApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsday.php?d=${pragueDate}&l=${leagueConfig.id}`;
 
                 const fetchHeaders = {
@@ -1529,18 +1532,19 @@ async function providniApiHeartbeat() {
                 };
 
                 const [resLive, resDay] = await Promise.all([
-                    fetch(liveApiUrl, { headers: fetchHeaders }).catch(() => null),
-                    fetch(dayApiUrl, { headers: fetchHeaders }).catch(() => null)
+                    fetch(liveApiUrl, { headers: fetchHeaders }).catch(e => { console.error(`Live fetch error:`, e.message); return null; }),
+                    fetch(dayApiUrl, { headers: fetchHeaders }).catch(e => { console.error(`Day fetch error:`, e.message); return null; })
                 ]);
 
                 const liveJson = (resLive && resLive.ok) ? await resLive.json().catch(() => null) : null;
                 const dayJson = (resDay && resDay.ok) ? await resDay.json().catch(() => null) : null;
 
-                // 🧠 BLESKOVÁ SYNCHRONIZACE: Živé skóre z livescore.php má přednost před statickým eventsday.php
                 const eventsMap = new Map();
                 (dayJson?.events || []).forEach(ev => eventsMap.set(String(ev.idEvent), ev));
                 (liveJson?.events || []).forEach(ev => eventsMap.set(String(ev.idEvent), ev));
                 const rawItems = Array.from(eventsMap.values());
+
+                console.log(`🔍 API STATS [${leagueName}]: Načteno ${rawItems.length} zápasů (Live: ${(liveJson?.events || []).length}, Day: ${(dayJson?.events || []).length})`);
 
                 for (const item of rawItems) {
                     const apiId = String(item.idEvent);
