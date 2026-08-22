@@ -998,7 +998,7 @@ const zebricekMapa = {};
             }
         });
 
-        // 🎯 OSOBNÍ REKORD HRÁČE: Živý přepočet ze všech kol, kde hráč získal body
+        // 🎯 OSOBNÍ REKORD HRÁČE: Výpočet oficiálního maxima i živého rekordu z rozehraných kol
         Object.keys(zebricekMapa).forEach(uid => {
             let maxPts = 0;
             let maxKolo = '–';
@@ -1010,6 +1010,17 @@ const zebricekMapa = {};
             });
             zebricekMapa[uid].nejviceBoduVKole = maxPts;
             zebricekMapa[uid].nejviceBoduVKoleNazev = maxKolo;
+
+            let maxPtsLive = 0;
+            let maxKoloLive = '–';
+            Object.entries(zebricekMapa[uid].bodyPoKolechLive || {}).forEach(([klicKola, pts]) => {
+                if (pts > maxPtsLive) {
+                    maxPtsLive = pts;
+                    maxKoloLive = klicKola;
+                }
+            });
+            zebricekMapa[uid].nejviceBoduVKoleLive = maxPtsLive;
+            zebricekMapa[uid].nejviceBoduVKoleNazevLive = maxKoloLive;
         });
 
         const perfektniKolaSeznam = [];
@@ -1247,7 +1258,7 @@ const zebricekMapa = {};
                 spravneTendenceCount: zebricekMapa[uid].spravneTendenceCountLive || zebricekMapa[uid].spravneTendenceCount || 0,
                 vyhranaKolaCount: vyhraVKolePocetLive[zebricekMapa[uid].nickname] || vyhraVKolePocet[zebricekMapa[uid].nickname] || 0,
                 perfektniKolaCount: (perfektniKolaSeznam.filter(pk => pk.uid === uid) || []).length,
-                nejviceBoduVKole: zebricekMapa[uid].nejviceBoduVKole, nejviceBoduVKoleNazev: zebricekMapa[uid].nejviceBoduVKoleNazev || '–',
+                nejviceBoduVKole: zebricekMapa[uid].nejviceBoduVKoleLive || zebricekMapa[uid].nejviceBoduVKole || 0, nejviceBoduVKoleNazev: zebricekMapa[uid].nejviceBoduVKoleNazevLive || zebricekMapa[uid].nejviceBoduVKoleNazev || '–',
                 vitezMs: zebricekMapa[uid].vitezMs, nejStrelec: zebricekMapa[uid].nejStrelec,
                 bodyKoloAktualni: zebricekMapa[uid].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[uid].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[uid].bodyPoKolech[aktivniKolo] || 0),
                 otevrenaKola: pOtevrenaKolaLive,
