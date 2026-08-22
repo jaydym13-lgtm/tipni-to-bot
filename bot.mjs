@@ -1417,8 +1417,30 @@ const zebricekMapa = {};
 
 let isHeartbeatRunning = false;
 
+// ⚡ FAST-RETRY POMOCNÍK S 9S TIMEOUT POJISTKOU (MAX 2 POKUSY)
+async function fetchV2WithFastRetry(url, headers, maxPokusu = 2, timeoutMs = 9000) {
+    for (let pokus = 1; pokus <= maxPokusu; pokus++) {
+        try {
+            const res = await fetch(url, {
+                headers: headers,
+                signal: AbortSignal.timeout(timeoutMs)
+            });
+            if (res.ok) {
+                return await res.json();
+            }
+            console.log(`⚠️ Live API vrácen kód ${res.status} (pokus ${pokus}/${maxPokusu})...`);
+        } catch (err) {
+            console.log(`⚠️ Live API pokus ${pokus}/${maxPokusu} selhal nebo vypršel timeout 9s (${err.message})...`);
+        }
+        if (pokus < maxPokusu) {
+            await new Promise(r => setTimeout(r, 1000));
+        }
+    }
+    return null;
+}
+
 // =========================================================================
-// 🚀 SPOLEHLIVÝ LIVE ENGINE: V2 LIVESCORE API S HLAVIČKOU X-API-KEY
+// 🚀 SPOLEHLIVÝ LIVE ENGINE: V2 LIVESCORE API (30S CYKLUS S FAST-RETRY)
 // =========================================================================
 async function providniApiHeartbeat() {
     if (isHeartbeatRunning) return;
@@ -1479,14 +1501,13 @@ async function providniApiHeartbeat() {
             }
         }
 
-        // 📡 Stažení reálných živých výsledků z V2 Livescore
+        // 📡 Stažení reálných živých výsledků z V2 Livescore přes Fast-Retry
         const liveEventsMapa = {};
 
         if (maAktivniFotbal) {
             try {
-                const res = await fetch("https://www.thesportsdb.com/api/v2/json/livescore/soccer", { headers: v2Headers });
-                if (res.ok) {
-                    const json = await res.json();
+                const json = await fetchV2WithFastRetry("https://www.thesportsdb.com/api/v2/json/livescore/soccer", v2Headers, 2, 9000);
+                if (json) {
                     const items = json.livescore || json.events || [];
                     items.forEach(ev => { if (ev.idEvent) liveEventsMapa[String(ev.idEvent)] = ev; });
                 }
@@ -1497,9 +1518,8 @@ async function providniApiHeartbeat() {
 
         if (maAktivniHokej) {
             try {
-                const res = await fetch("https://www.thesportsdb.com/api/v2/json/livescore/ice-hockey", { headers: v2Headers });
-                if (res.ok) {
-                    const json = await res.json();
+                const json = await fetchV2WithFastRetry("https://www.thesportsdb.com/api/v2/json/livescore/ice-hockey", v2Headers, 2, 9000);
+                if (json) {
                     const items = json.livescore || json.events || [];
                     items.forEach(ev => { if (ev.idEvent) liveEventsMapa[String(ev.idEvent)] = ev; });
                 }
@@ -1702,11 +1722,11 @@ async function startEnterpriseApplication() {
     await hydratujDataZFirestore();
     zapniReaktivniSluchatka();
 
-    // ⏱️ AUTONOMNÍ VNITŘNÍ SMYČKA: Bot provádí kontrolu každých 60 sekund sám od sebe
-    console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím interní 60s smyčku pro kontrolu live výsledků...");
+    // ⏱️ AUTONOMNÍ VNITŘNÍ SMYČKA: Bot provádí kontrolu každých 30 sekund (Fast-Retry + 9s timeout)
+    console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím bleskovou 30s smyčku pro kontrolu live výsledků...");
     setInterval(() => {
         providniApiHeartbeat().catch(err => console.error("❌ Chyba interního Heartbeatu:", err));
-    }, 60000);
+    }, 30000);
 }
 
 startEnterpriseApplication();
