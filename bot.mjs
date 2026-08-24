@@ -798,6 +798,201 @@ async function autoGenerujTopZapasyProLigu(leagueName, realLeagueData) {
     }
 }
 
+// =========================================================================
+// 💡 SPOLEČNÝ ANALYTICKÝ MOZEK RADARU (BLESKOVÝ VÝPOČET Z RAM)
+// =========================================================================
+function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTipy, leagueName) {
+    const ligaKlic = String(leagueName).replace(/ /g, "_");
+    const zapasyPole = Object.entries(centralMatches).map(([id, z]) => ({ ...z, id }));
+    const odehraneZapasy = zapasyPole.filter(z => 
+        z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && 
+        z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED"
+    );
+
+    if (odehraneZapasy.length === 0) {
+        return {
+            totalniVybuchy: [],
+            vlciSamotari: [],
+            zlatyDul: null,
+            stedrostKlubu: [],
+            nejcastejsiTip: "–",
+            nejcastejsiTipPct: 0,
+            nejcastejsiVysledek: "–",
+            nejcastejsiVysledekPct: 0,
+            uspesnostTendencePct: 0,
+            uspesnostPresnePct: 0,
+            smolarSezony: null
+        };
+    }
+
+    const totalniVybuchy = [];
+    const vlciSamotari = [];
+    let zlatyDul = null;
+    let maxRozdanoBodu = -1;
+
+    const klubyStats = {};
+    const cetnostTipu = {};
+    const cetnostVysledku = {};
+    const smolariMap = {};
+
+    let celkemTipuSezもっと = 0;
+    let celkemSpravnychTendenci = 0;
+    let celkemPresnychTref = 0;
+
+    odehraneZapasy.forEach(zapas => {
+        const rDom = parseInt(zapas.vysledek_domaci);
+        const rHos = parseInt(zapas.vysledek_hoste);
+        if (isNaN(rDom) || isNaN(rHos)) return;
+
+        const vysledekStr = `${rDom} : ${rHos}`;
+        cetnostVysledku[vysledekStr] = (cetnostVysledku[vysledekStr] || 0) + 1;
+
+        let celkemBoduZapasu = 0;
+        let presnychZasahu = 0;
+        const hraciSBody = [];
+        let tipovaloLidi = 0;
+
+        const dNazev = zapas.domaci || "Domácí";
+        const hNazev = zapas.hoste || "Hosté";
+
+        if (!klubyStats[dNazev]) klubyStats[dNazev] = { body: 0, zapasu: 0, uspesne: 0, celkemTipu: 0 };
+        if (!klubyStats[hNazev]) klubyStats[hNazev] = { body: 0, zapasu: 0, uspesne: 0, celkemTipu: 0 };
+        klubyStats[dNazev].zapasu++;
+        klubyStats[hNazev].zapasu++;
+
+        Object.keys(uzivateleProfily).forEach(uid => {
+            const p = uzivateleProfily[uid];
+            if (!p.leagues || !p.leagues.includes(leagueName)) return;
+
+            const uSouteze = uzivateleTipy[uid] || {};
+            const uSoutezData = uSouteze[ligaKlic] || {};
+            const uTip = uSoutezData.tipy ? uSoutezData.tipy[zapas.id] : null;
+
+            if (!uTip || uTip.tip_domaci === undefined || uTip.tip_domaci === null || String(uTip.tip_domaci).trim() === '') return;
+
+            const tDom = parseInt(uTip.tip_domaci);
+            const tHos = parseInt(uTip.tip_hoste);
+            if (isNaN(tDom) || isNaN(tHos)) return;
+
+            tipovaloLidi++;
+            celkemTipuSezもっと++;
+
+            const tipStr = `${tDom} : ${tHos}`;
+            cetnostTipu[tipStr] = (cetnostTipu[tipStr] || 0) + 1;
+
+            const body = vypocitejBodyZapasuLocal(tDom, tHos, rDom, rHos, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
+
+            klubyStats[dNazev].celkemTipu++;
+            klubyStats[hNazev].celkemTipu++;
+
+            const jePresny = (tDom === rDom && tHos === rHos && (!zapas.isPlayoff || rDom !== rHos || uTip.postup === zapas.postup));
+            const jeTendence = (tDom > tHos && rDom > rHos) || (tDom < tHos && rDom < rHos) || (tDom === tHos && rDom === rHos);
+
+            if (jePresny) celkemPresnychTref++;
+            if (jeTendence) celkemSpravnychTendenci++;
+
+            if (body > 0) {
+                celkemBoduZapasu += body;
+                hraciSBody.push({ uid, nick: p.nickname, body });
+                klubyStats[dNazev].body += body;
+                klubyStats[hNazev].body += body;
+                klubyStats[dNazev].uspesne++;
+                klubyStats[hNazev].uspesne++;
+            }
+
+            if (jePresny) {
+                presnychZasahu++;
+            } else {
+                const rozdil = Math.abs(tDom - rDom) + Math.abs(tHos - rHos);
+                if (rozdil === 1) {
+                    smolariMap[uid] = (smolariMap[uid] || 0) + 1;
+                }
+            }
+        });
+
+        const zapasLabel = `${dNazev} ${rDom} : ${rHos} ${hNazev}`;
+        const koloLabel = zapas.kolo || "Šampionát";
+
+        // 1. 💀 Totální výbuch (Tipovalo se, ale nikdo nezískal ani bod)
+        if (tipovaloLidi > 0 && hraciSBody.length === 0) {
+            totalniVybuchy.push({
+                zapas: zapasLabel,
+                kolo: koloLabel,
+                datum: zapas.datum
+            });
+        }
+
+        // 2. 🐺 Vlk samotář (Právě 1 hráč z ligy bodoval)
+        if (tipovaloLidi > 1 && hraciSBody.length === 1) {
+            vlciSamotari.push({
+                zapas: zapasLabel,
+                kolo: koloLabel,
+                hrac: hraciSBody[0].nick,
+                body: hraciSBody[0].body,
+                datum: zapas.datum
+            });
+        }
+
+        // 3. 💰 Zlatý důl (Absolutní bodový festival)
+        if (celkemBoduZapasu > maxRozdanoBodu || (celkemBoduZapasu === maxRozdanoBodu && zlatyDul && presnychZasahu > zlatyDul.presnych)) {
+            maxRozdanoBodu = celkemBoduZapasu;
+            zlatyDul = {
+                zapas: zapasLabel,
+                kolo: koloLabel,
+                rozdanoBodu: celkemBoduZapasu,
+                presnych: presnychZasahu
+            };
+        }
+    });
+
+    // 🏟️ Seřazení kompletní tabulky štědrosti klubů
+    const stedrostKlubu = Object.entries(klubyStats).map(([tym, d]) => ({
+        tym: tym,
+        prumerBodu: d.zapasu > 0 ? parseFloat((d.body / d.zapasu).toFixed(1)) : 0,
+        uspesnost: d.celkemTipu > 0 ? Math.round((d.uspesne / d.celkemTipu) * 100) : 0,
+        celkemBodu: d.body,
+        zapasu: d.zapasu
+    })).sort((a, b) => {
+        if (b.prumerBodu !== a.prumerBodu) return b.prumerBodu - a.prumerBodu;
+        return b.uspesnost - a.uspesnost;
+    });
+
+    // 🔮 Přání vs. Realita
+    const sortedTipy = Object.entries(cetnostTipu).sort((a, b) => b[1] - a[1]);
+    const topTip = sortedTipy[0] ? sortedTipy[0][0] : "–";
+    const topTipCount = sortedTipy[0] ? sortedTipy[0][1] : 0;
+    const topTipPct = celkemTipuSezもっと > 0 ? Math.round((topTipCount / celkemTipuSezもっと) * 100) : 0;
+
+    const sortedVysledky = Object.entries(cetnostVysledku).sort((a, b) => b[1] - a[1]);
+    const topVysledek = sortedVysledky[0] ? sortedVysledky[0][0] : "–";
+    const topVysledekCount = sortedVysledky[0] ? sortedVysledky[0][1] : 0;
+    const topVysledekPct = odehraneZapasy.length > 0 ? Math.round((topVysledekCount / odehraneZapasy.length) * 100) : 0;
+
+    // 🩹 Smolař sezóny
+    let nejSmolarUid = null;
+    let maxSmula = 0;
+    Object.entries(smolariMap).forEach(([uid, count]) => {
+        if (count > maxSmula) {
+            maxSmula = count;
+            nejSmolarUid = uid;
+        }
+    });
+
+    return {
+        totalniVybuchy: totalniVybuchy.reverse(), // Nejnovější nahoře
+        vlciSamotari: vlciSamotari.reverse(),     // Nejnovější nahoře
+        zlatyDul: zlatyDul,
+        stedrostKlubu: stedrostKlubu,
+        nejcastejsiTip: topTip,
+        nejcastejsiTipPct: topTipPct,
+        nejcastejsiVysledek: topVysledek,
+        nejcastejsiVysledekPct: topVysledekPct,
+        uspesnostTendencePct: celkemTipuSezもっと > 0 ? Math.round((celkemSpravnychTendenci / celkemTipuSezもっと) * 100) : 0,
+        uspesnostPresnePct: celkemTipuSezもっと > 0 ? Math.round((celkemPresnychTref / celkemTipuSezもっと) * 100) : 0,
+        smolarSezony: nejSmolarUid ? { nick: uzivateleProfily[nejSmolarUid]?.nickname, pocet: maxSmula } : null
+    };
+}
+
 async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false) {
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
@@ -1288,6 +1483,8 @@ const zebricekMapa = {};
 
         const timestampNow = new Date().toISOString();
 
+        const radarStats = spoctiRadarStatistikyBot(centralMatches, RAM_USERS_PROFILES, RAM_USERS_TIPS, leagueName);
+
         const leaderboardJson = {
             zebricek: zebricekPole, 
             zebricekLive: zebricekLivePole, 
@@ -1307,6 +1504,7 @@ const zebricekMapa = {};
             otevrenaKolaStatistiky: otevrenaKolaStatistiky,
             otevrenaKolaSeznam: otevrenaKolaArr,
             aktivniKoloText: aktivniKolo,
+            radar: radarStats,
             aktualizovano: timestampNow
         };
 
