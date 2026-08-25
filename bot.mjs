@@ -49,6 +49,125 @@ const RAM_USERS_PROFILES = {};
 const RAM_USERS_TIPS = {};     
 const RAM_CENTRAL_MATCHES = {}; 
 
+// 📊 RAM MEZIPAMĚŤ KURZŮ Z API-SPORTS
+const RAM_CENTRAL_ODDS = {};
+
+// 🗺️ ČÍSELNÍK SOUTĚŽÍ PRO API-SPORTS (Kurzy Bet365)
+const API_SPORTS_MAPA = {
+    "Chance Liga": { id: 345, sport: "football" },
+    "Premier League": { id: 39, sport: "football" },
+    "MS ve fotbale": { id: 1, sport: "football" },
+    "Tipsport Extraliga": { id: 47, sport: "hockey" },
+    "MS v hokeji": { id: 1, sport: "hockey" }
+};
+
+// 🧮 AUTONOMNÍ VÝPOČET SEZÓNNÍ FORMY TÝMU Z RAM (0 API VOLÁNÍ)
+function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
+    const tymNorm = String(tym || '').trim().toLowerCase();
+    if (!tymNorm || tymNorm === 'neznámý') return [];
+
+    const refMs = Date.parse(datumZapasuIso) || Date.now();
+
+    const odehrane = Object.values(allMatchesInLeague).filter(z => {
+        const dNorm = String(z.domaci || '').trim().toLowerCase();
+        const hNorm = String(z.hoste || '').trim().toLowerCase();
+        const hralTym = (dNorm === tymNorm || hNorm === tymNorm);
+        const jeDohrano = (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus === "FINISHED");
+        const zMs = Date.parse(z.datum);
+        const jeDrive = !isNaN(zMs) && zMs < refMs;
+        return hralTym && jeDohrano && jeDrive;
+    });
+
+    odehrane.sort((a, b) => (Date.parse(b.datum) || 0) - (Date.parse(a.datum) || 0));
+    const poslednich5 = odehrane.slice(0, 5);
+    if (poslednich5.length === 0) return [];
+
+    return poslednich5.map(z => {
+        const dNorm = String(z.domaci || '').trim().toLowerCase();
+        const jeDoma = (dNorm === tymNorm);
+        const gDom = parseInt(z.vysledek_domaci, 10);
+        const gHos = parseInt(z.vysledek_hoste, 10);
+        const gMy = jeDoma ? gDom : gHos;
+        const gOni = jeDoma ? gHos : gDom;
+
+        if (gMy > gOni) return 'V';
+        if (gMy === gOni) return 'R';
+        return 'P';
+    });
+}
+
+// 🌐 HLOUBKOVÁ SMYČKA: STAŽENÍ KURZŮ BET365 Z API-SPORTS
+async function synchronizujKurzyVsechLig() {
+    const apiKey = process.env.API_SPORTS_KEY;
+    if (!apiKey) {
+        console.log("ℹ️ API_SPORTS_KEY není nastaven v env proměnných. Přeskakuji kurzy.");
+        return;
+    }
+
+    const sezoneYear = parseInt(String(SEZONA_ID).split('_')[0], 10) || 2026;
+
+    for (const leagueName of SEZNAM_LIG) {
+        const cfg = API_SPORTS_MAPA[leagueName];
+        if (!cfg) continue;
+
+        try {
+            const isHockey = cfg.sport === "hockey";
+            const baseUrl = isHockey ? "https://v1.hockey.api-sports.io" : "https://v3.football.api-sports.io";
+            const targetUrl = `${baseUrl}/odds?league=${cfg.id}&season=${sezoneYear}`;
+
+            const res = await fetch(targetUrl, {
+                headers: {
+                    "x-apisports-key": apiKey,
+                    "User-Agent": "TipniToBot/1.0"
+                },
+                signal: AbortSignal.timeout(9000)
+            });
+
+            if (!res.ok) {
+                console.log(`⚠️ API-Sports (${leagueName}) status: ${res.status}`);
+                continue;
+            }
+
+            const data = await res.json();
+            const oddsItems = data.response || [];
+            if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
+
+            oddsItems.forEach(item => {
+                const homeRaw = item.teams?.home?.name || "";
+                const awayRaw = item.teams?.away?.name || "";
+                const dTrans = slovnikTymu[homeRaw] || homeRaw;
+                const hTrans = slovnikTymu[awayRaw] || awayRaw;
+                const key = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
+
+                const bmakers = item.bookmakers || [];
+                const bmaker = bmakers.find(b => String(b.name || '').toLowerCase().includes('bet365')) || bmakers[0];
+                if (!bmaker) return;
+
+                const bet = (bmaker.bets || []).find(b => b.id === 1 || String(b.name || '').toLowerCase().includes('winner'));
+                if (!bet || !bet.values) return;
+
+                const v1 = bet.values.find(v => v.value === "Home" || v.value === "1");
+                const vX = bet.values.find(v => v.value === "Draw" || v.value === "X");
+                const v2 = bet.values.find(v => v.value === "Away" || v.value === "2");
+
+                if (v1 && v2) {
+                    RAM_CENTRAL_ODDS[leagueName][key] = {
+                        "1": parseFloat(v1.odd),
+                        "X": vX ? parseFloat(vX.odd) : null,
+                        "2": parseFloat(v2.odd),
+                        bookmaker: bmaker.name || "Bet365"
+                    };
+                }
+            });
+
+            console.log(`📊 KURZY [${leagueName}]: Načteno ${Object.keys(RAM_CENTRAL_ODDS[leagueName] || {}).length} kurzů z API-Sports.`);
+        } catch (e) {
+            console.error(`❌ Chyba stahování kurzů pro ${leagueName}:`, e.message);
+        }
+        await new Promise(r => setTimeout(r, 600));
+    }
+}
+
 // 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
 const RAM_BOT_CONFIG = {
     active: true,         // Hlavní nouzový vypínač bota
@@ -1516,8 +1635,28 @@ const zebricekMapa = {};
         const pocetZapasu = Object.keys(centralMatches).length;
         const hasMatches = pocetZapasu > 0;
 
+        // 🧠 OBOHACENÍ ROZPISU: Přibalení sezónní formy (V/R/P) a kurzů Bet365 k zápasům
+        const zapasyMapaObohacena = {};
+        Object.entries(centralMatches).forEach(([mId, z]) => {
+            const dTrans = z.domaci;
+            const hTrans = z.hoste;
+            const matchKey = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
+            const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || null;
+            const formaDomaci = spoctiSezonniFormuTymu(dTrans, z.datum, centralMatches);
+            const formaHoste = spoctiSezonniFormuTymu(hTrans, z.datum, centralMatches);
+
+            zapasyMapaObohacena[mId] = {
+                ...z,
+                odds: matchOdds,
+                forma: {
+                    domaci: formaDomaci,
+                    hoste: formaHoste
+                }
+            };
+        });
+
         const rozpisJson = { 
-            zapasyMapa: centralMatches, 
+            zapasyMapa: zapasyMapaObohacena, 
             hasMatches: hasMatches, 
             aktualizovano: timestampNow 
         };
@@ -1931,11 +2070,40 @@ async function startEnterpriseApplication() {
     await hydratujDataZFirestore();
     zapniReaktivniSluchatka();
 
+    if (url === "/sync-odds" || url.startsWith("/sync-odds")) {
+            console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím synchronizaci sázkových kurzů z API-Sports...`);
+            synchronizujKurzyVsechLig().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("❌ Chyba při synchronizaci kurzů:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Synchronizace kurzů zahájena.");
+            return;
+        }
+
+        // Standardní Health Check pro Render (GET /) - do API vůbec nesahá
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("OK - Health Check v pořádku, backend mozek běží.");
+    }).listen(PORT, () => {
+        console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen a připraven pro Render.`);
+    });
+
+    await hydratujDataZFirestore();
+    zapniReaktivniSluchatka();
+
+    // 📊 Úvodní stažení kurzů při startu serveru
+    synchronizujKurzyVsechLig().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("⚠️ Úvodní synchronizace kurzů selhala:", err));
+
     // ⏱️ AUTONOMNÍ VNITŘNÍ SMYČKA: Bot provádí kontrolu každých 30 sekund (Fast-Retry + 9s timeout)
     console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím bleskovou 30s smyčku pro kontrolu live výsledků...");
     setInterval(() => {
         providniApiHeartbeat().catch(err => console.error("❌ Chyba interního Heartbeatu:", err));
     }, 30000);
+
+    // 🌅 SMYČKA 2: Každé 2 hodiny aktualizace sázkařských kurzů (v čase 06:00 - 22:00)
+    setInterval(() => {
+        const hodina = new Date().getHours();
+        if (hodina >= 6 && hodina <= 22) {
+            synchronizujKurzyVsechLig().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("❌ Chyba periodické synchronizace kurzů:", err));
+        }
+    }, 2 * 60 * 60 * 1000);
 }
 
 startEnterpriseApplication();
