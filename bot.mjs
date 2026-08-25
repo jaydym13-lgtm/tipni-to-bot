@@ -129,6 +129,10 @@ async function synchronizujKurzyVsechLig() {
             }
 
             const data = await res.json();
+            console.log(`🔍 DEBUG API-Sports RESPONSE (${leagueName}):`, JSON.stringify(data).substring(0, 500));
+            if (data.errors && Object.keys(data.errors).length > 0) {
+                console.log(`❌ API-Sports ERRORS (${leagueName}):`, JSON.stringify(data.errors));
+            }
             const oddsItems = data.response || [];
             if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
 
