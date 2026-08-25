@@ -2060,17 +2060,7 @@ async function startEnterpriseApplication() {
             return;
         }
 
-        // Standardní Health Check pro Render (GET /) - do API vůbec nesahá
-        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end("OK - Health Check v pořádku, backend mozek běží.");
-    }).listen(PORT, () => {
-        console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen a připraven pro Render.`);
-    });
-
-    await hydratujDataZFirestore();
-    zapniReaktivniSluchatka();
-
-    if (url === "/sync-odds" || url.startsWith("/sync-odds")) {
+        if (url === "/sync-odds" || url.startsWith("/sync-odds")) {
             console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím synchronizaci sázkových kurzů z API-Sports...`);
             synchronizujKurzyVsechLig().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("❌ Chyba při synchronizaci kurzů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
