@@ -391,7 +391,7 @@ const RAM_BOT_CONFIG = {
     waitInterval: 10
 };
 
-// Slovník pro autonomní překlad a sjednocení týmů ze sportovního API
+// Slovník pro autonomní překlad týmů ze sportovního API
 const slovnikTymu = {
     "Czech Republic": "Česko", "Czechia": "Česko", "Mexico": "Mexiko",
     "South Korea": "Jižní Korea", "Korea Republic": "Jižní Korea", "South Africa": "JAR",
@@ -426,7 +426,7 @@ const slovnikTymu = {
     "Zlin": "Zlín", "FC Zlín": "Zlín", "Fastav Zlín": "Zlín",
     "Bohemians 1905": "Bohemians", "Bohemians Praha 1905": "Bohemians",
     "Zbrojovka Brno": "Zbrojovka Brno", "FC Zbrojovka Brno": "Zbrojovka Brno", "FC Brno": "Zbrojovka Brno",
-    "Artis Brno": "Artis Brno", "SK Artis Brno": "Artis Brno", "SK Líšeň": "Artis Brno", "SK Lisen": "Artis Brno", "SK Lisen Brno": "Artis Brno", "Lisen": "Artis Brno",
+    "Artis Brno": "Artis Brno", "SK Artis Brno": "Artis Brno", "SK Líšeň": "Artis Brno", "SK Lisen": "Artis Brno",
     // 🏴󠁧󠁢󠁥󠁮󠁧󠁿 PREMIER LEAGUE - KRÁTKÉ ČESKÉ NÁZVY
     "Arsenal FC": "Arsenal", "Arsenal": "Arsenal",
     "Aston Villa FC": "Aston Villa", "Aston Villa": "Aston Villa",
@@ -465,18 +465,7 @@ const slovnikTymu = {
     "Banes Motor České Budějovice": "Č. Budějovice", "HC Motor České Budějovice": "Č. Budějovice", "Motor České Budějovice": "Č. Budějovice"
 };
 
-// 🧼 INTELIGENTNÍ NORMALIZÁTOR NÁZVŮ TÝMŮ PRO BEZCHYBNÉ PÁROVÁNÍ
-function PL_NORM(str) {
-    if (!str || typeof str !== 'string') return '';
-    const mapped = slovnikTymu[str] || slovnikTymu[str.trim()] || str;
-    return String(mapped)
-        .toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/\b(sk|fc|fk|ac|hc|afc|tj|bk|1\.)\b/gi, "")
-        .replace(/[^a-z0-9]/gi, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
+const PL_NORM = (str) => String(str || '').toLowerCase().trim();
 
 // --- 🧮 VÝPOČET BODŮ ---
 const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, tipPostup, realPostup, isPlayoff, isTopMatch = false, leagueName = "DEFAULT") => {
