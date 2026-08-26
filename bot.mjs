@@ -110,7 +110,7 @@ async function stahniDenniKurzyRapidApi(sport, datumIso) {
         return 0;
     }
 
-    const url = `https://sportapi7.p.rapidapi.com/api/v1/sport/${sport}/odds/${datumIso}?providerId=1`;
+    const url = `https://sportapi7.p.rapidapi.com/api/v1/sport/${sport}/odds/1/${datumIso}`;
 
     try {
         const res = await fetch(url, {
