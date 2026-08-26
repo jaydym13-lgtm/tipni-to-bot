@@ -209,7 +209,7 @@ async function stahniDenniKurzyRapidApi(sport, datumIso) {
         return 0;
     }
 
-    const url = `https://sportapi7.p.rapidapi.com/api/v1/sport/${sport}/odds/${datumIso}?providerId=1`;
+    const url = `https://sportapi7.p.rapidapi.com/api/v1/sport/${sport}/odds/1/${datumIso}`;
 
     try {
         const res = await fetch(url, {
@@ -2223,9 +2223,15 @@ async function startEnterpriseApplication() {
 
     await hydratujDataZFirestore();
     await nactiEventMapZR2();
+
+    // 🛡️ Pokud mapa ID na R2 ještě neexistuje, ihned ji stáhneme a založíme
+    if (Object.keys(RAM_EVENT_MAP).length === 0) {
+        console.log("🗺️ INICIALIZACE: event_map.json na R2 chybí, stahuji a ukládám novou mapu...");
+        await synchronizujSofaScoreEventMap();
+    }
+
     await nactiKurzyZR2();
     zapniReaktivniSluchatka();
-
     // 📊 Startovní Smart Sync (stáhne pouze pokud v R2/RAM data pro aktuální dny chybí)
     smartSyncKurzu(false).catch(err => console.error("⚠️ Startovní Smart Sync selhal:", err));
 
