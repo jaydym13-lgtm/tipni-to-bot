@@ -2111,8 +2111,6 @@ async function startEnterpriseApplication() {
     });
 
     await hydratujDataZFirestore();
-    zapniReaktivniSluchatka();
-
     await nactiKurzyZR2();
     zapniReaktivniSluchatka();
 
@@ -2138,6 +2136,7 @@ async function startEnterpriseApplication() {
             smartSyncKurzu(true).catch(err => console.error("❌ Chyba plánovaného Smart Syncu:", err));
         }
     }, 5 * 60 * 1000);
+}
 
 startEnterpriseApplication();
 
