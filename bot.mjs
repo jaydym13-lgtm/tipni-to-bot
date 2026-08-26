@@ -319,15 +319,31 @@ async function ulozKurzyDoR2() {
     }
 }
 
-// 🧠 SMART SYNC PLÁNOVAČ: TÝDENNÍ OKNO (PONDĚLÍ AŽ PONDĚLÍ)
+// 🧠 SMART SYNC PLÁNOVAČ: PEVNÝ TÝDENNÍ BLOK (PONDĚLÍ 00:00 AŽ NÁSLEDUJÍCÍ PONDĚLÍ 23:59)
 async function smartSyncKurzu() {
-    console.log("📅 SMART SYNC: Vyhodnocuji zápasový kalendář pro kurzy na 8 dní dopředu...");
     const nyni = new Date();
-    const nyniMs = nyni.getTime();
-    const dnyKeStazeni = { football: new Set(), "ice-hockey": new Set() };
+    const denVTydnu = nyni.getDay(); // 0 = neděle, 1 = pondělí ... 6 = sobota
+    const offsetPondeli = (denVTydnu === 0 ? -6 : 1 - denVTydnu);
 
-    const minTargetMs = nyniMs - (0.5 * 24 * 60 * 60 * 1000);
-    const maxTargetMs = nyniMs + (8.0 * 24 * 60 * 60 * 1000);
+    // Začátek aktuálního týdne (pondělí 00:00)
+    const pondeliStart = new Date(nyni);
+    pondeliStart.setDate(nyni.getDate() + offsetPondeli);
+    pondeliStart.setHours(0, 0, 0, 0);
+
+    // Konec aktuálního herního bloku (následující pondělí 23:59:59)
+    const dalsiPondeliKonec = new Date(pondeliStart);
+    dalsiPondeliKonec.setDate(pondeliStart.getDate() + 7);
+    dalsiPondeliKonec.setHours(23, 59, 59, 999);
+
+    const minTargetMs = pondeliStart.getTime();
+    const maxTargetMs = dalsiPondeliKonec.getTime();
+
+    const datumStartStr = pondeliStart.toISOString().split("T")[0];
+    const datumKonecStr = dalsiPondeliKonec.toISOString().split("T")[0];
+
+    console.log(`📅 SMART SYNC: Kontroluji pevný týdenní blok (${datumStartStr} až ${datumKonecStr})...`);
+
+    const dnyKeStazeni = { football: new Set(), "ice-hockey": new Set() };
 
     SEZNAM_LIG.forEach(leagueName => {
         const zapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
@@ -339,6 +355,7 @@ async function smartSyncKurzu() {
             const matchMs = Date.parse(z.datum);
             if (isNaN(matchMs)) return;
 
+            // Zkontroluje výhradně zápasy spadající do aktuálního pondělního bloku
             if (matchMs >= minTargetMs && matchMs <= maxTargetMs) {
                 const matchDate = new Date(matchMs);
                 const datumIso = matchDate.toISOString().split("T")[0];
@@ -356,11 +373,11 @@ async function smartSyncKurzu() {
     const pocetHokejDnu = dnyKeStazeni["ice-hockey"].size;
 
     if (pocetFotbalDnu === 0 && pocetHokejDnu === 0) {
-        console.log("🛡️ SMART SYNC: Všechny zápasy v okně již kurzy mají. Přeskakuji API volání (0 requestů spáleno).");
+        console.log(`🛡️ SMART SYNC: Týdenní blok (${datumStartStr} až ${datumKonecStr}) je kompletně pokrytý. Přeskakuji API volání (0 requestů).`);
         return;
     }
 
-    console.log(`🚀 SMART SYNC: Stahuji kurzy pro ${pocetFotbalDnu} fotbalových a ${pocetHokejDnu} hokejových dnů.`);
+    console.log(`🚀 SMART SYNC: Stahuji chybějící kurzy pro ${pocetFotbalDnu} fotbalových a ${pocetHokejDnu} hokejových dnů v bloku.`);
 
     let celkemNaparovano = 0;
     for (const datum of dnyKeStazeni.football) {
