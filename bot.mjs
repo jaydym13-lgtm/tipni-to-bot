@@ -89,80 +89,121 @@ function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
 
 // 🌐 PŘÍMÝ VEŘEJNÝ FEED SÁZKOVÝCH KURZŮ (TIPSPORT / CHANCE)
 const SAZKOVKA_URL_MAPA = {
-    "Chance Liga": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2F1-ceska-liga",
-    "Premier League": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2Fanglie-1-liga",
-    "Tipsport Extraliga": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Fhokej%2Fceska-republika-extraliga",
-    "MS ve fotbale": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2Fmistrovstvi-sveta",
-    "MS v hokeji": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Fhokej%2Fmistrovstvi-sveta"
+    "Chance Liga": [
+        "https://www.chance.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2F1-ceska-liga",
+        "https://www.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2F1-ceska-liga"
+    ],
+    "Premier League": [
+        "https://www.chance.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2Fanglie-1-liga",
+        "https://www.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2Fanglie-1-liga"
+    ],
+    "Tipsport Extraliga": [
+        "https://www.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Fhokej%2Fceska-republika-extraliga",
+        "https://www.chance.cz/rest/offer/v1/offer?matchDetail=false&url=%2Fhokej%2Fceska-republika-extraliga"
+    ],
+    "MS ve fotbale": [
+        "https://www.chance.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2Fmistrovstvi-sveta",
+        "https://www.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2Fmistrovstvi-sveta"
+    ],
+    "MS v hokeji": [
+        "https://www.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Fhokej%2Fmistrovstvi-sveta",
+        "https://www.chance.cz/rest/offer/v1/offer?matchDetail=false&url=%2Fhokej%2Fmistrovstvi-sveta"
+    ]
+};
+
+const BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "cs-CZ,cs;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.tipsport.cz/kurzy",
+    "Origin": "https://www.tipsport.cz",
+    "sec-ch-ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin"
 };
 
 async function synchronizujKurzyZeSazkovek() {
     console.log("📊 SÁZKOVÉ KURZY: Spouštím bleskovou paralelní synchronizaci kurzů...");
 
     await Promise.allSettled(SEZNAM_LIG.map(async (leagueName) => {
-        const targetUrl = SAZKOVKA_URL_MAPA[leagueName];
-        if (!targetUrl) return;
+        const urls = SAZKOVKA_URL_MAPA[leagueName] || [];
+        if (urls.length === 0) return;
 
-        try {
-            const res = await fetch(targetUrl, {
-                headers: {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                    "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "cs-CZ,cs;q=0.9"
-                },
-                signal: AbortSignal.timeout(9000)
-            });
+        let successData = null;
+        let usedBookmaker = "Tipsport";
 
-            if (!res.ok) {
-                console.log(`⚠️ Sázkový feed (${leagueName}) vrátil kód ${res.status}`);
-                return;
-            }
+        for (const targetUrl of urls) {
+            try {
+                const isChance = targetUrl.includes("chance.cz");
+                usedBookmaker = isChance ? "Chance" : "Tipsport";
+                
+                const customHeaders = {
+                    ...BROWSER_HEADERS,
+                    "Referer": isChance ? "https://www.chance.cz/kurzy" : "https://www.tipsport.cz/kurzy",
+                    "Origin": isChance ? "https://www.chance.cz" : "https://www.tipsport.cz"
+                };
 
-            const data = await res.json();
-            const zapasyList = data.offerMatches || data.matches || [];
-            if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
-
-            let nactenoPocet = 0;
-
-            zapasyList.forEach(item => {
-                const nameParts = String(item.name || "").split(" - ");
-                if (nameParts.length < 2) return;
-
-                const rawD = nameParts[0].trim();
-                const rawH = nameParts[1].trim();
-
-                const dTrans = slovnikTymu[rawD] || rawD;
-                const hTrans = slovnikTymu[rawH] || rawH;
-                const key = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
-
-                const opps = item.opportunities || item.odds || [];
-                let o1 = null, oX = null, o2 = null;
-
-                opps.forEach(o => {
-                    const typ = String(o.type || o.name || "").trim().toUpperCase();
-                    const val = parseFloat(o.odd || o.rate || o.value);
-                    if (isNaN(val)) return;
-
-                    if (typ === "1" || typ === "HOME" || typ.includes("1")) o1 = val;
-                    else if (typ === "0" || typ === "X" || typ === "DRAW" || typ.includes("REM")) oX = val;
-                    else if (typ === "2" || typ === "AWAY" || typ.includes("2")) o2 = val;
+                const res = await fetch(targetUrl, {
+                    headers: customHeaders,
+                    signal: AbortSignal.timeout(8000)
                 });
 
-                if (o1 && o2) {
-                    RAM_CENTRAL_ODDS[leagueName][key] = {
-                        "1": o1,
-                        "X": oX,
-                        "2": o2,
-                        bookmaker: "Tipsport"
-                    };
-                    nactenoPocet++;
+                if (res.ok) {
+                    successData = await res.json();
+                    break;
                 }
+                console.log(`⚠️ Sázkový feed (${leagueName} -> ${usedBookmaker}) vrátil status ${res.status}`);
+            } catch (err) {
+                console.log(`⚠️ Pokus o stažení kurzů (${leagueName} -> ${usedBookmaker}) selhal: ${err.message}`);
+            }
+        }
+
+        if (!successData) return;
+
+        const zapasyList = successData.offerMatches || successData.matches || [];
+        if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
+
+        let nactenoPocet = 0;
+
+        zapasyList.forEach(item => {
+            const nameParts = String(item.name || "").split(" - ");
+            if (nameParts.length < 2) return;
+
+            const rawD = nameParts[0].trim();
+            const rawH = nameParts[1].trim();
+
+            const dTrans = slovnikTymu[rawD] || rawD;
+            const hTrans = slovnikTymu[rawH] || rawH;
+            const key = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
+
+            const opps = item.opportunities || item.odds || [];
+            let o1 = null, oX = null, o2 = null;
+
+            opps.forEach(o => {
+                const typ = String(o.type || o.name || "").trim().toUpperCase();
+                const val = parseFloat(o.odd || o.rate || o.value);
+                if (isNaN(val)) return;
+
+                if (typ === "1" || typ === "HOME" || typ.includes("1")) o1 = val;
+                else if (typ === "0" || typ === "X" || typ === "DRAW" || typ.includes("REM")) oX = val;
+                else if (typ === "2" || typ === "AWAY" || typ.includes("2")) o2 = val;
             });
 
-            console.log(`📊 KURZY [${leagueName}]: Načteno ${nactenoPocet} kurzů z nabídky Tipsportu.`);
-        } catch (e) {
-            console.error(`❌ Chyba stahování kurzů pro ${leagueName}:`, e.message);
-        }
+            if (o1 && o2) {
+                RAM_CENTRAL_ODDS[leagueName][key] = {
+                    "1": o1,
+                    "X": oX,
+                    "2": o2,
+                    bookmaker: usedBookmaker
+                };
+                nactenoPocet++;
+            }
+        });
+
+        console.log(`📊 KURZY [${leagueName}]: Načteno ${nactenoPocet} kurzů (${usedBookmaker}).`);
     }));
 }
 
