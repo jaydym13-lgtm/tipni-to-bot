@@ -49,17 +49,8 @@ const RAM_USERS_PROFILES = {};
 const RAM_USERS_TIPS = {};     
 const RAM_CENTRAL_MATCHES = {}; 
 
-// 📊 RAM MEZIPAMĚŤ KURZŮ Z API-SPORTS
+// 📊 RAM MEZIPAMĚŤ KURZŮ (1-X-2)
 const RAM_CENTRAL_ODDS = {};
-
-// 🗺️ ČÍSELNÍK SOUTĚŽÍ PRO API-SPORTS (Kurzy Bet365)
-const API_SPORTS_MAPA = {
-    "Chance Liga": { id: 345, sport: "football" },
-    "Premier League": { id: 39, sport: "football" },
-    "MS ve fotbale": { id: 1, sport: "football" },
-    "Tipsport Extraliga": { id: 47, sport: "hockey" },
-    "MS v hokeji": { id: 1, sport: "hockey" }
-};
 
 // 🧮 AUTONOMNÍ VÝPOČET SEZÓNNÍ FORMY TÝMU Z RAM (0 API VOLÁNÍ)
 function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
@@ -96,80 +87,83 @@ function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
     });
 }
 
-// 🌐 HLOUBKOVÁ SMYČKA: STAŽENÍ KURZŮ BET365 Z API-SPORTS
-async function synchronizujKurzyVsechLig() {
-    const apiKey = process.env.API_SPORTS_KEY;
-    if (!apiKey) {
-        console.log("ℹ️ API_SPORTS_KEY není nastaven v env proměnných. Přeskakuji kurzy.");
-        return;
-    }
+// 🌐 PŘÍMÝ VEŘEJNÝ FEED SÁZKOVÝCH KURZŮ (TIPSPORT / CHANCE)
+const SAZKOVKA_URL_MAPA = {
+    "Chance Liga": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2F1-ceska-liga",
+    "Premier League": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2Fanglie-1-liga",
+    "Tipsport Extraliga": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Fhokej%2Fceska-republika-extraliga",
+    "MS ve fotbale": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Ffotbal%2Fmistrovstvi-sveta",
+    "MS v hokeji": "https://m.tipsport.cz/rest/offer/v1/offer?matchDetail=false&url=%2Fhokej%2Fmistrovstvi-sveta"
+};
 
-    const sezoneYear = parseInt(String(SEZONA_ID).split('_')[0], 10) || 2026;
+async function synchronizujKurzyZeSazkovek() {
+    console.log("📊 SÁZKOVÉ KURZY: Spouštím bleskovou paralelní synchronizaci kurzů...");
 
-    for (const leagueName of SEZNAM_LIG) {
-        const cfg = API_SPORTS_MAPA[leagueName];
-        if (!cfg) continue;
+    await Promise.allSettled(SEZNAM_LIG.map(async (leagueName) => {
+        const targetUrl = SAZKOVKA_URL_MAPA[leagueName];
+        if (!targetUrl) return;
 
         try {
-            const isHockey = cfg.sport === "hockey";
-            const baseUrl = isHockey ? "https://v1.hockey.api-sports.io" : "https://v3.football.api-sports.io";
-            const targetUrl = `${baseUrl}/odds?league=${cfg.id}&season=${sezoneYear}`;
-
             const res = await fetch(targetUrl, {
                 headers: {
-                    "x-apisports-key": apiKey,
-                    "User-Agent": "TipniToBot/1.0"
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "cs-CZ,cs;q=0.9"
                 },
                 signal: AbortSignal.timeout(9000)
             });
 
             if (!res.ok) {
-                console.log(`⚠️ API-Sports (${leagueName}) status: ${res.status}`);
-                continue;
+                console.log(`⚠️ Sázkový feed (${leagueName}) vrátil kód ${res.status}`);
+                return;
             }
 
             const data = await res.json();
-            console.log(`🔍 DEBUG API-Sports RESPONSE (${leagueName}):`, JSON.stringify(data).substring(0, 500));
-            if (data.errors && Object.keys(data.errors).length > 0) {
-                console.log(`❌ API-Sports ERRORS (${leagueName}):`, JSON.stringify(data.errors));
-            }
-            const oddsItems = data.response || [];
+            const zapasyList = data.offerMatches || data.matches || [];
             if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
 
-            oddsItems.forEach(item => {
-                const homeRaw = item.teams?.home?.name || "";
-                const awayRaw = item.teams?.away?.name || "";
-                const dTrans = slovnikTymu[homeRaw] || homeRaw;
-                const hTrans = slovnikTymu[awayRaw] || awayRaw;
+            let nactenoPocet = 0;
+
+            zapasyList.forEach(item => {
+                const nameParts = String(item.name || "").split(" - ");
+                if (nameParts.length < 2) return;
+
+                const rawD = nameParts[0].trim();
+                const rawH = nameParts[1].trim();
+
+                const dTrans = slovnikTymu[rawD] || rawD;
+                const hTrans = slovnikTymu[rawH] || rawH;
                 const key = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
 
-                const bmakers = item.bookmakers || [];
-                const bmaker = bmakers.find(b => String(b.name || '').toLowerCase().includes('bet365')) || bmakers[0];
-                if (!bmaker) return;
+                const opps = item.opportunities || item.odds || [];
+                let o1 = null, oX = null, o2 = null;
 
-                const bet = (bmaker.bets || []).find(b => b.id === 1 || String(b.name || '').toLowerCase().includes('winner'));
-                if (!bet || !bet.values) return;
+                opps.forEach(o => {
+                    const typ = String(o.type || o.name || "").trim().toUpperCase();
+                    const val = parseFloat(o.odd || o.rate || o.value);
+                    if (isNaN(val)) return;
 
-                const v1 = bet.values.find(v => v.value === "Home" || v.value === "1");
-                const vX = bet.values.find(v => v.value === "Draw" || v.value === "X");
-                const v2 = bet.values.find(v => v.value === "Away" || v.value === "2");
+                    if (typ === "1" || typ === "HOME" || typ.includes("1")) o1 = val;
+                    else if (typ === "0" || typ === "X" || typ === "DRAW" || typ.includes("REM")) oX = val;
+                    else if (typ === "2" || typ === "AWAY" || typ.includes("2")) o2 = val;
+                });
 
-                if (v1 && v2) {
+                if (o1 && o2) {
                     RAM_CENTRAL_ODDS[leagueName][key] = {
-                        "1": parseFloat(v1.odd),
-                        "X": vX ? parseFloat(vX.odd) : null,
-                        "2": parseFloat(v2.odd),
-                        bookmaker: bmaker.name || "Bet365"
+                        "1": o1,
+                        "X": oX,
+                        "2": o2,
+                        bookmaker: "Tipsport"
                     };
+                    nactenoPocet++;
                 }
             });
 
-            console.log(`📊 KURZY [${leagueName}]: Načteno ${Object.keys(RAM_CENTRAL_ODDS[leagueName] || {}).length} kurzů z API-Sports.`);
+            console.log(`📊 KURZY [${leagueName}]: Načteno ${nactenoPocet} kurzů z nabídky Tipsportu.`);
         } catch (e) {
             console.error(`❌ Chyba stahování kurzů pro ${leagueName}:`, e.message);
         }
-        await new Promise(r => setTimeout(r, 600));
-    }
+    }));
 }
 
 // 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
@@ -296,54 +290,64 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
     return ziskaneBody;
 };
 
-// --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD) ---
-// --- 📤 DISTRIBUČNÍ SYSTÉM (R2 UPLOAD S ZÁMKEM PARALELNÍCH ZÁPISŮ A DEBOUNCEREM) ---
-const activeR2Uploads = new Set();
+// --- 📤 DISTRIBUČNÍ SYSTÉM (PROMISE MUTEX LOCK PRO R2 UPLOAD) ---
+const r2UploadLocks = new Map();
 
 async function uploadToR2(leagueName, filename, jsonData) {
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const dynamicPath = `sezony/${SEZONA_ID}/${ligaKlic}/${filename}`;
 
-    // 🛡️ OCHRANNÝ JISTIČ PARALELIZMU: Čekáme na dokončení probíhajícího uploadu pro stejný objekt
-    while (activeR2Uploads.has(dynamicPath)) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-    }
+    // 🛡️ PROMISE MUTEX: Zajišťuje atomický zápis souborů bez busy-wait smyček
+    const previousLock = r2UploadLocks.get(dynamicPath) || Promise.resolve();
+    
+    const currentUpload = (async () => {
+        await previousLock;
+        try {
+            const bodyText = JSON.stringify(jsonData, null, 2);
+            await r2Client.send(new PutObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: dynamicPath,
+                Body: bodyText,
+                ContentType: "application/json"
+            }));
+        } catch (err) {
+            console.error(`❌ Chyba distribuce souboru ${filename} (${leagueName}) do R2:`, err);
+        }
+    })();
 
-    activeR2Uploads.add(dynamicPath);
-
-    try {
-        await new Promise(resolve => setTimeout(resolve, 300));
-        const bodyText = JSON.stringify(jsonData, null, 2);
-        await r2Client.send(new PutObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: dynamicPath,
-            Body: bodyText,
-            ContentType: "application/json"
-        }));
-    } catch (err) {
-        console.error(`❌ Chyba distribuce souboru ${filename} (${leagueName}) do R2:`, err);
-    } finally {
-        activeR2Uploads.delete(dynamicPath);
+    r2UploadLocks.set(dynamicPath, currentUpload.catch(() => {}));
+    await currentUpload;
+    if (r2UploadLocks.get(dynamicPath) === currentUpload) {
+        r2UploadLocks.delete(dynamicPath);
     }
 }
 
-// ⏱️ DEBOUNCE JISTIČ: Slučuje smršť Firestore událostí do jediného klidného zápisu
-let rekonstrukceTimer = null;
-let forceHistoryPending = false;
+// ⚡ ATOMICKÁ EXECUTION QUEUE: Zpracovává změny okamžitě a bezpečně bez setTimeout prodlev
+let isReconstructing = false;
+let pendingRerun = false;
+let pendingHistoryFlag = false;
 
-function planujRekonstrukciAgregatu(forceWriteHistory = false) {
-    if (forceWriteHistory) forceHistoryPending = true;
+async function planujRekonstrukciAgregatu(forceWriteHistory = false) {
+    if (forceWriteHistory) pendingHistoryFlag = true;
 
-    if (rekonstrukceTimer) {
-        clearTimeout(rekonstrukceTimer);
+    if (isReconstructing) {
+        pendingRerun = true;
+        return;
     }
 
-    rekonstrukceTimer = setTimeout(async () => {
-        const historyFlag = forceHistoryPending;
-        forceHistoryPending = false;
-        rekonstrukceTimer = null;
-        await rekonstruujAgregatyVsechny(historyFlag);
-    }, 1500);
+    isReconstructing = true;
+    try {
+        do {
+            pendingRerun = false;
+            const writeHistory = pendingHistoryFlag;
+            pendingHistoryFlag = false;
+            await rekonstruujAgregatyVsechny(writeHistory);
+        } while (pendingRerun);
+    } catch (err) {
+        console.error("❌ Chyba ve frontě přepočtu agregátů:", err);
+    } finally {
+        isReconstructing = false;
+    }
 }
 
 // --- 📡 DETERMINISTICKÁ HYDRATACE A REAKTIVNÍ STREAMY ---
@@ -1769,7 +1773,7 @@ const zebricekMapa = {};
 
 let isHeartbeatRunning = false;
 
-// ⚡ FAST-RETRY POMOCNÍK S 9S TIMEOUT POJISTKOU (MAX 2 POKUSY)
+// ⚡ FAST-RETRY POMOCNÍK: Deterministický síťový jistič s bleskovým návratem (0 prodlev)
 async function fetchV2WithFastRetry(url, headers, maxPokusu = 2, timeoutMs = 9000) {
     for (let pokus = 1; pokus <= maxPokusu; pokus++) {
         try {
@@ -1782,10 +1786,7 @@ async function fetchV2WithFastRetry(url, headers, maxPokusu = 2, timeoutMs = 900
             }
             console.log(`⚠️ Live API vrácen kód ${res.status} (pokus ${pokus}/${maxPokusu})...`);
         } catch (err) {
-            console.log(`⚠️ Live API pokus ${pokus}/${maxPokusu} selhal nebo vypršel timeout 9s (${err.message})...`);
-        }
-        if (pokus < maxPokusu) {
-            await new Promise(r => setTimeout(r, 1000));
+            console.log(`⚠️ Live API pokus ${pokus}/${maxPokusu} selhal nebo vypršel timeout (${err.message})...`);
         }
     }
     return null;
@@ -1977,7 +1978,6 @@ async function synchronizujRozpisyVsechLig() {
         if (leagueConfig.provider === "MANUAL") continue;
 
         try {
-            await new Promise(resolve => setTimeout(resolve, 1000));
             const sezoneYear = String(SEZONA_ID).replace("_", "-");
             const targetApiUrl = `https://www.thesportsdb.com/api/v1/json/${dbKey}/eventsseason.php?id=${leagueConfig.id}&s=${sezoneYear}`;
             const fetchHeaders = {
@@ -1986,13 +1986,16 @@ async function synchronizujRozpisyVsechLig() {
             };
 
             let response = null;
-            for (let pokus = 1; pokus <= 3; pokus++) {
-                response = await fetch(targetApiUrl, { headers: fetchHeaders });
-                if (response.ok) break;
-
-                if (pokus < 3) {
-                    console.log(`⚠️ KALENDÁŘ [${leagueName}]: API vrátilo ${response.status} (pokus ${pokus}/3). Opakuji za 7 s...`);
-                    await new Promise(resolve => setTimeout(resolve, 7000));
+            for (let pokus = 1; pokus <= 2; pokus++) {
+                try {
+                    response = await fetch(targetApiUrl, { 
+                        headers: fetchHeaders,
+                        signal: AbortSignal.timeout(9000)
+                    });
+                    if (response.ok) break;
+                    console.log(`⚠️ KALENDÁŘ [${leagueName}]: API vrátilo ${response.status} (pokus ${pokus}/2)...`);
+                } catch (fetchErr) {
+                    console.log(`⚠️ KALENDÁŘ [${leagueName}]: Pokus ${pokus}/2 selhal (${fetchErr.message})...`);
                 }
             }
 
@@ -2065,8 +2068,8 @@ async function startEnterpriseApplication() {
         }
 
         if (url === "/sync-odds" || url.startsWith("/sync-odds")) {
-            console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím synchronizaci sázkových kurzů z API-Sports...`);
-            synchronizujKurzyVsechLig().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("❌ Chyba při synchronizaci kurzů:", err));
+            console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím synchronizaci sázkových kurzů...`);
+            synchronizujKurzyZeSazkovek().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("❌ Chyba při synchronizaci kurzů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
             res.end("OK - Synchronizace kurzů zahájena.");
             return;
@@ -2083,7 +2086,7 @@ async function startEnterpriseApplication() {
     zapniReaktivniSluchatka();
 
     // 📊 Úvodní stažení kurzů při startu serveru
-    synchronizujKurzyVsechLig().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("⚠️ Úvodní synchronizace kurzů selhala:", err));
+    synchronizujKurzyZeSazkovek().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("⚠️ Úvodní synchronizace kurzů selhala:", err));
 
     // ⏱️ AUTONOMNÍ VNITŘNÍ SMYČKA: Bot provádí kontrolu každých 30 sekund (Fast-Retry + 9s timeout)
     console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím bleskovou 30s smyčku pro kontrolu live výsledků...");
@@ -2095,10 +2098,9 @@ async function startEnterpriseApplication() {
     setInterval(() => {
         const hodina = new Date().getHours();
         if (hodina >= 6 && hodina <= 22) {
-            synchronizujKurzyVsechLig().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("❌ Chyba periodické synchronizace kurzů:", err));
+            synchronizujKurzyZeSazkovek().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("❌ Chyba periodické synchronizace kurzů:", err));
         }
     }, 2 * 60 * 60 * 1000);
-}
 
 startEnterpriseApplication();
 
