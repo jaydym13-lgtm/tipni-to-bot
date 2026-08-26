@@ -89,10 +89,21 @@ function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
 }
 
 // =========================================================================
-// 🌐 RAPIDAPI (SPORTAPI7) - KURZOVÝ ENGINE S LIMITEM 50 REQ/MĚSÍC
+// 🌐 RAPIDAPI (SPORTAPI7) - KURZOVÝ ENGINE A PŘEKLADOVÁ MAPA ID
 // =========================================================================
 
-// Pomocná funkce pro převod britského zlomku ("9/4") na desetinné číslo (3.25)
+// 🗺️ RAM MAPA SOFASCORE ID -> { league, matchKey, domaci, hoste }
+const RAM_EVENT_MAP = {};
+const EVENT_MAP_R2_KEY = `sezony/${SEZONA_ID}/event_map.json`;
+const ODDS_R2_KEY = `sezony/${SEZONA_ID}/central_odds.json`;
+
+// Číselník turnajů na SofaScore pro 1měsíční generování mapy
+const SOFASCORE_TOURNAMENTS = {
+    "Chance Liga": { id: 237, sport: "football" },
+    "Premier League": { id: 17, sport: "football" },
+    "Tipsport Extraliga": { id: 1977, sport: "ice-hockey" }
+};
+
 function prevedZlomekNaKurz(fraction) {
     if (!fraction || typeof fraction !== 'string') return null;
     const parts = fraction.split('/');
@@ -103,6 +114,94 @@ function prevedZlomekNaKurz(fraction) {
     return parseFloat(((num / den) + 1).toFixed(2));
 }
 
+// 📦 NAČTENÍ A ZÁPIS MAPY ID Z/DO R2
+async function nactiEventMapZR2() {
+    try {
+        const response = await r2Client.send(new GetObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: EVENT_MAP_R2_KEY
+        }));
+        const strData = await response.Body.transformToString();
+        const json = JSON.parse(strData);
+        if (json && typeof json === "object") {
+            Object.assign(RAM_EVENT_MAP, json);
+            console.log(`📦 R2 TREZOR: Načtena mapa ${Object.keys(RAM_EVENT_MAP).length} zápasových ID.`);
+        }
+    } catch (err) {
+        console.log("ℹ️ R2 TREZOR: event_map.json na R2 zatím neexistuje.");
+    }
+}
+
+async function ulozEventMapDoR2() {
+    try {
+        await r2Client.send(new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: EVENT_MAP_R2_KEY,
+            Body: JSON.stringify(RAM_EVENT_MAP, null, 2),
+            ContentType: "application/json"
+        }));
+        console.log("💾 R2 TREZOR: Mapa zápasových ID úspěšně uložena na R2.");
+    } catch (err) {
+        console.error("❌ R2 TREZOR: Selhalo uložení event_map.json:", err.message);
+    }
+}
+
+// 🗺️ 1× MĚSÍČNĚ: STAŽENÍ SOFASCORE UDÁLOSTÍ PRO AUTOMATICKÉ PÁROVÁNÍ ID
+async function synchronizujSofaScoreEventMap() {
+    if (!RAPIDAPI_KEY) {
+        console.warn("⚠️ RAPIDAPI: Chybí RAPIDAPI_KEY pro generování mapy ID!");
+        return;
+    }
+
+    console.log("🗺️ MAPPER: Spouštím měsíční generování překladové mapy ID (1. den v měsíci)...");
+    let noveNalezeno = 0;
+
+    for (const [leagueName, cfg] of Object.entries(SOFASCORE_TOURNAMENTS)) {
+        try {
+            const url = `https://sportapi7.p.rapidapi.com/api/v1/unique-tournament/${cfg.id}/season/events`;
+            const res = await fetch(url, {
+                headers: {
+                    "x-rapidapi-key": RAPIDAPI_KEY,
+                    "x-rapidapi-host": "sportapi7.p.rapidapi.com"
+                },
+                signal: AbortSignal.timeout(9000)
+            });
+
+            if (!res.ok) {
+                console.log(`⚠️ MAPPER [${leagueName}]: API status ${res.status}`);
+                continue;
+            }
+
+            const data = await res.json();
+            const events = data?.events || [];
+
+            events.forEach(ev => {
+                const eventId = String(ev.id);
+                const rawHome = ev.homeTeam?.name || "";
+                const rawAway = ev.awayTeam?.name || "";
+                const dNorm = slovnikTymu[rawHome] || rawHome;
+                const hNorm = slovnikTymu[rawAway] || rawAway;
+                const matchKey = `${PL_NORM(dNorm)} vs ${PL_NORM(hNorm)}`;
+
+                RAM_EVENT_MAP[eventId] = {
+                    league: leagueName,
+                    matchKey: matchKey,
+                    domaci: dNorm,
+                    hoste: hNorm
+                };
+                noveNalezeno++;
+            });
+        } catch (err) {
+            console.error(`❌ MAPPER [${leagueName}]: Selhala synchronizace turnaje:`, err.message);
+        }
+    }
+
+    if (noveNalezeno > 0) {
+        await ulozEventMapDoR2();
+    }
+    console.log(`✅ MAPPER: Dokončeno. V paměti je ${Object.keys(RAM_EVENT_MAP).length} propojených zápasů.`);
+}
+
 // Jednorázové stažení denního balíku kurzů pro daný sport z RapidAPI
 async function stahniDenniKurzyRapidApi(sport, datumIso) {
     if (!RAPIDAPI_KEY) {
@@ -110,7 +209,7 @@ async function stahniDenniKurzyRapidApi(sport, datumIso) {
         return 0;
     }
 
-    const url = `https://sportapi7.p.rapidapi.com/api/v1/sport/${sport}/odds/1/${datumIso}`;
+    const url = `https://sportapi7.p.rapidapi.com/api/v1/sport/${sport}/odds/${datumIso}?providerId=1`;
 
     try {
         const res = await fetch(url, {
@@ -122,7 +221,6 @@ async function stahniDenniKurzyRapidApi(sport, datumIso) {
             signal: AbortSignal.timeout(9000)
         });
 
-        // Kontrola zbývajícího limitu z hlaviček serveru
         const zbyvaDotazu = res.headers.get("x-ratelimit-requests-remaining");
         if (zbyvaDotazu !== null) {
             console.log(`📊 RAPIDAPI: Úspěšný dotaz (${sport} pro ${datumIso}). Zbývá volání do limitu: ${zbyvaDotazu}`);
@@ -156,16 +254,25 @@ async function stahniDenniKurzyRapidApi(sport, datumIso) {
             });
 
             if (o1 && o2) {
-                // Uložíme kurz pod ID události
-                SEZNAM_LIG.forEach(leagueName => {
-                    if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
-                    RAM_CENTRAL_ODDS[leagueName][eventId] = {
-                        "1": o1,
-                        "X": oX,
-                        "2": o2,
-                        bookmaker: "Bet365"
-                    };
-                });
+                const oddsObj = {
+                    "1": o1,
+                    "X": oX,
+                    "2": o2,
+                    bookmaker: "Bet365"
+                };
+
+                // Párování přes přeloženou mapu podle jmen týmů
+                const meta = RAM_EVENT_MAP[eventId];
+                if (meta && meta.league) {
+                    if (!RAM_CENTRAL_ODDS[meta.league]) RAM_CENTRAL_ODDS[meta.league] = {};
+                    RAM_CENTRAL_ODDS[meta.league][meta.matchKey] = oddsObj;
+                    RAM_CENTRAL_ODDS[meta.league][eventId] = oddsObj;
+                } else {
+                    SEZNAM_LIG.forEach(leagueName => {
+                        if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
+                        RAM_CENTRAL_ODDS[leagueName][eventId] = oddsObj;
+                    });
+                }
                 naparovano++;
             }
         }
@@ -177,8 +284,6 @@ async function stahniDenniKurzyRapidApi(sport, datumIso) {
 }
 
 // 📦 PERZISTENCE KURZŮ NA CLOUDFLARE R2
-const ODDS_R2_KEY = `sezony/${SEZONA_ID}/central_odds.json`;
-
 async function nactiKurzyZR2() {
     try {
         const response = await r2Client.send(new GetObjectCommand({
@@ -213,7 +318,7 @@ async function ulozKurzyDoR2() {
     }
 }
 
-// 🧠 SMART SYNC PLÁNOVAČ S OCHRANOU PROTI RESTARTOVÁNÍ A LIMITEM 50 REQ/MĚSÍC
+// 🧠 SMART SYNC PLÁNOVAČ: PLNÉ POKRYTÍ BLOKU ČT–STŘ S ROZŠÍŘENÝM OKNEM
 async function smartSyncKurzu(isWeeklySundayTrigger = false) {
     console.log(`📅 SMART SYNC: Vyhodnocuji zápasový kalendář pro kurzy (Režim: ${isWeeklySundayTrigger ? "Nedělní okno Čt–Stř" : "Aktuální dny"} )...`);
     const nyni = new Date();
@@ -223,13 +328,11 @@ async function smartSyncKurzu(isWeeklySundayTrigger = false) {
     let minTargetMs, maxTargetMs;
 
     if (isWeeklySundayTrigger) {
-        // Neděle ráno: zajímá nás následující blok Čtvrtek (+4 dny) až Středa (+10 dní)
-        minTargetMs = nyniMs + (3.5 * 24 * 60 * 60 * 1000);
-        maxTargetMs = nyniMs + (10.5 * 24 * 60 * 60 * 1000);
+        minTargetMs = nyniMs + (3.0 * 24 * 60 * 60 * 1000);
+        maxTargetMs = nyniMs + (11.5 * 24 * 60 * 60 * 1000);
     } else {
-        // Start / Bootstrap: zajímají nás dny ode dneška do nejbližší středy
         minTargetMs = nyniMs - (0.5 * 24 * 60 * 60 * 1000);
-        maxTargetMs = nyniMs + (7.5 * 24 * 60 * 60 * 1000);
+        maxTargetMs = nyniMs + (8.5 * 24 * 60 * 60 * 1000);
     }
 
     SEZNAM_LIG.forEach(leagueName => {
@@ -2104,6 +2207,14 @@ async function startEnterpriseApplication() {
             return;
         }
 
+        if (url === "/sync-event-map" || url.startsWith("/sync-event-map")) {
+            console.log(`🗺️ SERVISNÍ PING (/sync-event-map): Spouštím měsíční generování mapy ID...`);
+            synchronizujSofaScoreEventMap().catch(err => console.error("❌ Chyba mapování:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Mapování ID zahájeno.");
+            return;
+        }
+
         res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
         res.end("OK - Health Check v pořádku, backend mozek běží.");
     }).listen(PORT, () => {
@@ -2111,6 +2222,7 @@ async function startEnterpriseApplication() {
     });
 
     await hydratujDataZFirestore();
+    await nactiEventMapZR2();
     await nactiKurzyZR2();
     zapniReaktivniSluchatka();
 
@@ -2130,10 +2242,22 @@ async function startEnterpriseApplication() {
         const hodina = d.getHours();
         const minuta = d.getMinutes();
 
-        // Spustí se POUZE v neděli mezi 04:00 a 04:05 ráno
         if (denVTydnu === 0 && hodina === 4 && minuta < 5) {
             console.log("⏰ ČASOVÝ TRIGGER: Spouštím nedělní týdenní synchronizaci kurzů (okno Čt–Stř)...");
             smartSyncKurzu(true).catch(err => console.error("❌ Chyba plánovaného Smart Syncu:", err));
+        }
+    }, 5 * 60 * 1000);
+
+    // 🗺️ SMYČKA 3: Měsíční mapování ID (1. den v měsíci ve 02:00 ráno)
+    setInterval(() => {
+        const d = new Date();
+        const denVMesici = d.getDate(); // 1 = první den v měsíci
+        const hodina = d.getHours();
+        const minuta = d.getMinutes();
+
+        if (denVMesici === 1 && hodina === 2 && minuta < 5) {
+            console.log("⏰ ČASOVÝ TRIGGER: Spouštím měsíční generování mapy ID...");
+            synchronizujSofaScoreEventMap().catch(err => console.error("❌ Chyba měsíčního mapování:", err));
         }
     }, 5 * 60 * 1000);
 }
