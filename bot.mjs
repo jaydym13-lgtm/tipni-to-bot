@@ -97,11 +97,11 @@ const RAM_EVENT_MAP = {};
 const EVENT_MAP_R2_KEY = `sezony/${SEZONA_ID}/event_map.json`;
 const ODDS_R2_KEY = `sezony/${SEZONA_ID}/central_odds.json`;
 
-// Číselník turnajů na SofaScore pro 1měsíční generování mapy
+// Číselník turnajů na SofaScore s přesnými ID turnajů a sezón
 const SOFASCORE_TOURNAMENTS = {
-    "Chance Liga": { id: 237, sport: "football" },
-    "Premier League": { id: 17, sport: "football" },
-    "Tipsport Extraliga": { id: 1977, sport: "ice-hockey" }
+    "Chance Liga": { id: 49, seasonId: 96966, sport: "football" },
+    "Premier League": { id: 1, seasonId: 96668, sport: "football" },
+    "Tipsport Extraliga": { id: 109, seasonId: 96126, sport: "ice-hockey" }
 };
 
 function prevedZlomekNaKurz(fraction) {
@@ -153,12 +153,12 @@ async function synchronizujSofaScoreEventMap() {
         return;
     }
 
-    console.log("🗺️ MAPPER: Spouštím měsíční generování překladové mapy ID (1. den v měsíci)...");
+    console.log("🗺️ MAPPER: Spouštím měsíční generování překladové mapy ID...");
     let noveNalezeno = 0;
 
     for (const [leagueName, cfg] of Object.entries(SOFASCORE_TOURNAMENTS)) {
         try {
-            const url = `https://sportapi7.p.rapidapi.com/api/v1/unique-tournament/${cfg.id}/season/events`;
+            const url = `https://sportapi7.p.rapidapi.com/api/v1/tournament/${cfg.id}/season/${cfg.seasonId}/events/next/0`;
             const res = await fetch(url, {
                 headers: {
                     "x-rapidapi-key": RAPIDAPI_KEY,
@@ -191,6 +191,7 @@ async function synchronizujSofaScoreEventMap() {
                 };
                 noveNalezeno++;
             });
+            console.log(`🗺️ MAPPER [${leagueName}]: Úspěšně načteno ${events.length} zápasů.`);
         } catch (err) {
             console.error(`❌ MAPPER [${leagueName}]: Selhala synchronizace turnaje:`, err.message);
         }
@@ -199,7 +200,7 @@ async function synchronizujSofaScoreEventMap() {
     if (noveNalezeno > 0) {
         await ulozEventMapDoR2();
     }
-    console.log(`✅ MAPPER: Dokončeno. V paměti je ${Object.keys(RAM_EVENT_MAP).length} propojených zápasů.`);
+    console.log(`✅ MAPPER: Dokončeno. V paměti je celkem ${Object.keys(RAM_EVENT_MAP).length} propojených zápasů.`);
 }
 
 // Jednorázové stažení denního balíku kurzů pro daný sport z RapidAPI
