@@ -2101,6 +2101,7 @@ async function startEnterpriseApplication() {
             synchronizujKurzyZeSazkovek().then(() => rekonstruujAgregatyVsechny()).catch(err => console.error("❌ Chyba periodické synchronizace kurzů:", err));
         }
     }, 2 * 60 * 60 * 1000);
+}
 
 startEnterpriseApplication();
 
