@@ -319,22 +319,15 @@ async function ulozKurzyDoR2() {
     }
 }
 
-// 🧠 SMART SYNC PLÁNOVAČ: PLNÉ POKRYTÍ BLOKU ČT–STŘ S ROZŠÍŘENÝM OKNEM
-async function smartSyncKurzu(isWeeklySundayTrigger = false) {
-    console.log(`📅 SMART SYNC: Vyhodnocuji zápasový kalendář pro kurzy (Režim: ${isWeeklySundayTrigger ? "Nedělní okno Čt–Stř" : "Aktuální dny"} )...`);
+// 🧠 SMART SYNC PLÁNOVAČ: TÝDENNÍ OKNO (PONDĚLÍ AŽ PONDĚLÍ)
+async function smartSyncKurzu() {
+    console.log("📅 SMART SYNC: Vyhodnocuji zápasový kalendář pro kurzy na 8 dní dopředu...");
     const nyni = new Date();
     const nyniMs = nyni.getTime();
     const dnyKeStazeni = { football: new Set(), "ice-hockey": new Set() };
 
-    let minTargetMs, maxTargetMs;
-
-    if (isWeeklySundayTrigger) {
-        minTargetMs = nyniMs + (3.0 * 24 * 60 * 60 * 1000);
-        maxTargetMs = nyniMs + (11.5 * 24 * 60 * 60 * 1000);
-    } else {
-        minTargetMs = nyniMs - (0.5 * 24 * 60 * 60 * 1000);
-        maxTargetMs = nyniMs + (8.5 * 24 * 60 * 60 * 1000);
-    }
+    const minTargetMs = nyniMs - (0.5 * 24 * 60 * 60 * 1000);
+    const maxTargetMs = nyniMs + (8.0 * 24 * 60 * 60 * 1000);
 
     SEZNAM_LIG.forEach(leagueName => {
         const zapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
@@ -363,7 +356,7 @@ async function smartSyncKurzu(isWeeklySundayTrigger = false) {
     const pocetHokejDnu = dnyKeStazeni["ice-hockey"].size;
 
     if (pocetFotbalDnu === 0 && pocetHokejDnu === 0) {
-        console.log("🛡️ SMART SYNC: Všechny zápasy v cílovém okně již kurzy mají. Přeskakuji API volání (0 requestů spáleno).");
+        console.log("🛡️ SMART SYNC: Všechny zápasy v okně již kurzy mají. Přeskakuji API volání (0 requestů spáleno).");
         return;
     }
 
@@ -2242,16 +2235,16 @@ async function startEnterpriseApplication() {
         providniApiHeartbeat().catch(err => console.error("❌ Chyba interního Heartbeatu:", err));
     }, 30000);
 
-    // 🌅 SMYČKA 2: Smart Sync kurzů (Běží VÝHRADNĚ 1× týdně v neděli v 04:00 ráno pro okno Čt–Stř)
+    // 🌅 SMYČKA 2: Smart Sync kurzů (Běží VÝHRADNĚ 1× týdně v PONDĚLÍ v 15:00 pro okno Po–Po)
     setInterval(() => {
         const d = new Date();
-        const denVTydnu = d.getDay(); // 0 = neděle
+        const denVTydnu = d.getDay(); // 1 = pondělí
         const hodina = d.getHours();
         const minuta = d.getMinutes();
 
-        if (denVTydnu === 0 && hodina === 4 && minuta < 5) {
-            console.log("⏰ ČASOVÝ TRIGGER: Spouštím nedělní týdenní synchronizaci kurzů (okno Čt–Stř)...");
-            smartSyncKurzu(true).catch(err => console.error("❌ Chyba plánovaného Smart Syncu:", err));
+        if (denVTydnu === 1 && hodina === 15 && minuta < 5) {
+            console.log("⏰ ČASOVÝ TRIGGER: Spouštím pondělní týdenní synchronizaci kurzů (okno Po–Po)...");
+            smartSyncKurzu().catch(err => console.error("❌ Chyba plánovaného Smart Syncu:", err));
         }
     }, 5 * 60 * 1000);
 
