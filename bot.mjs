@@ -484,9 +484,7 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
     const pravidla = PRAVIDLA_LIG[leagueName] || PRAVIDLA_LIG["DEFAULT"];
     let ziskaneBody = 0;
 
-    if (tDom === rDom && tHos === rHos) {
-        ziskaneBody = pravidla.presnyVysledek;
-        if (leagueName === "Tipsport Extraliga") {
+    if (leagueName === "Tipsport Extraliga") {
         const jeTipRemiza = (tDom === tHos);
         const jeRealRemiza = (rDom === rHos);
 
@@ -498,7 +496,7 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
             }
         } else if (!jeTipRemiza && !jeRealRemiza) {
             const presny = (tDom === rDom && tHos === rHos);
-            const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH);
+            const spravnaTendence = (tDom > tHos && rDom > rHos) || (tDom < tHos && rDom < rHos);
             if (presny) ziskaneBody = 5;
             else if (spravnaTendence) ziskaneBody = 2;
             else ziskaneBody = 0;
