@@ -69,17 +69,19 @@ export const PRAVIDLA_LIG = {
         roundBonus: 0
     },
     "Tipsport Extraliga": {
-        presnyVysledek: 3,
-        chytraTendence: 0,
-        zakladniTendence: 1,
+        presnyVysledek: 5,
+        chytraTendence: 3,         // Základ pro nepřesnou remízu = 3 b.
+        presnaRemiza: 6,           // Základ pro přesnou remízu = 6 b.
+        zakladniTendence: 2,
         golUtechy: 0,
-        playoffBonus: 0,
-        penaltyNenatipovano: 0,
-        bonusVitez: 10,
-        bonusStrelec: 10,
-        hasTopMatch: false,
-        topMatchMultiplier: 1,
-        roundBonus: 0
+        playoffBonus: 1,           // +1 b. za vítěze v OT / SN
+        penaltyNenatipovano: -1,
+        bonusVitez: 15,
+        bonusStrelec: 8,
+        bonusKanadskeBodovani: 8,
+        hasTopMatch: true,
+        topMatchMultiplier: 2,
+        roundBonus: 5
     },
     "DEFAULT": {
         presnyVysledek: 3,
@@ -121,8 +123,32 @@ export const vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, le
 
     let body = 0;
 
-    // ⚽ 1. CHANCE LIGA & LIGA NÁRODŮ
-    if (leagueName === "Chance Liga" || leagueName === "Liga národů") {
+    // 🏒 1. TIPSPORT EXTRALIGA
+    if (leagueName === "Tipsport Extraliga") {
+        const jeTipRemiza = (tD === tH);
+        const jeRealRemiza = (rD === rH);
+
+        if (jeTipRemiza && jeRealRemiza) {
+            const jePresnaRemiza = (tD === rD && tH === rH);
+            body = jePresnaRemiza ? (pravidla.presnaRemiza || 6) : (pravidla.chytraTendence || 3);
+
+            // Bonus +1 b. za trefeného vítěze v prodloužení / nájezdech
+            if (tipPostup && resPostup && tipPostup === resPostup) {
+                body += (pravidla.playoffBonus || 1);
+            }
+        } else if (!jeTipRemiza && !jeRealRemiza) {
+            const presny = (tD === rD && tH === rH);
+            const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH);
+
+            if (presny) body = pravidla.presnyVysledek;
+            else if (spravnaTendence) body = pravidla.zakladniTendence;
+            else body = 0;
+        } else {
+            body = 0;
+        }
+    }
+    // ⚽ 2. CHANCE LIGA & LIGA NÁRODŮ
+    else if (leagueName === "Chance Liga" || leagueName === "Liga národů") {
         const presny = (tD === rD && tH === rH);
         const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
         
@@ -130,12 +156,11 @@ export const vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, le
         else if (spravnaTendence) body = pravidla.zakladniTendence;
         else body = 0;
 
-        // Pro Ligu národů (Play-off / Final Four)
         if (isPlayoff && tD === tH && rD === rH && tipPostup && resPostup && tipPostup === resPostup) {
             body += pravidla.playoffBonus;
         }
     }
-    // ⚽ 2. MS VE FOTBALE & PREMIER LEAGUE
+    // ⚽ 3. MS VE FOTBALE & PREMIER LEAGUE
     else if (leagueName === "MS ve fotbale" || leagueName === "Premier League") {
         const presny = (tD === rD && tH === rH);
         const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
@@ -157,7 +182,7 @@ export const vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, le
             body += pravidla.playoffBonus;
         }
     }
-    // 🏒 3. HOKEJOVÉ LIGY & DEFAULT
+    // 🏒 4. OSTATNÍ (MS V HOKEJI & DEFAULT)
     else {
         const presny = (tD === rD && tH === rH);
         const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
