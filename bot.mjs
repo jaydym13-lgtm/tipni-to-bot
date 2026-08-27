@@ -486,27 +486,50 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
 
     if (tDom === rDom && tHos === rHos) {
         ziskaneBody = pravidla.presnyVysledek;
-        if (isPlayoff && rDom === rHos && realPostup && tipPostup && tipPostup === realPostup) {
-            ziskaneBody += pravidla.playoffBonus;
-        }
-    } else if (rDom === rHos && tDom === tHos) {
-        ziskaneBody = pravidla.chytraTendence > 0 ? pravidla.chytraTendence : pravidla.zakladniTendence;
-        if (isPlayoff && realPostup && tipPostup && tipPostup === realPostup) {
-            ziskaneBody += pravidla.playoffBonus;
+        if (leagueName === "Tipsport Extraliga") {
+        const jeTipRemiza = (tDom === tHos);
+        const jeRealRemiza = (rDom === rHos);
+
+        if (jeTipRemiza && jeRealRemiza) {
+            const jePresnaRemiza = (tDom === rDom && tHos === rHos);
+            ziskaneBody = jePresnaRemiza ? 6 : 3;
+            if (tipPostup && realPostup && tipPostup === realPostup) {
+                ziskaneBody += 1;
+            }
+        } else if (!jeTipRemiza && !jeRealRemiza) {
+            const presny = (tDom === rDom && tHos === rHos);
+            const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH);
+            if (presny) ziskaneBody = 5;
+            else if (spravnaTendence) ziskaneBody = 2;
+            else ziskaneBody = 0;
+        } else {
+            ziskaneBody = 0;
         }
     } else {
-        const tipRozdil = tDom - tHos; const realRozdil = rDom - rHos;
-        const spravnaTendence = (tipRozdil > 0 && realRozdil > 0) || (tipRozdil < 0 && realRozdil < 0);
-        if (spravnaTendence) {
-            const trefilGoly = (tDom === rDom || tHos === rHos);
-            const trefilRozdil = (tipRozdil === realRozdil);
-            if ((trefilGoly || trefilRozdil) && pravidla.chytraTendence > 0) {
-                ziskaneBody = pravidla.chytraTendence;
-            } else {
-                ziskaneBody = pravidla.zakladniTendence;
+        if (tDom === rDom && tHos === rHos) {
+            ziskaneBody = pravidla.presnyVysledek;
+            if (isPlayoff && rDom === rHos && realPostup && tipPostup && tipPostup === realPostup) {
+                ziskaneBody += pravidla.playoffBonus;
             }
-        } else if (pravidla.golUtechy > 0 && (tDom === rDom || tHos === rHos)) {
-            ziskaneBody = pravidla.golUtechy;
+        } else if (rDom === rHos && tDom === tHos) {
+            ziskaneBody = pravidla.chytraTendence > 0 ? pravidla.chytraTendence : pravidla.zakladniTendence;
+            if (isPlayoff && realPostup && tipPostup && tipPostup === realPostup) {
+                ziskaneBody += pravidla.playoffBonus;
+            }
+        } else {
+            const tipRozdil = tDom - tHos; const realRozdil = rDom - rHos;
+            const spravnaTendence = (tipRozdil > 0 && realRozdil > 0) || (tipRozdil < 0 && realRozdil < 0);
+            if (spravnaTendence) {
+                const trefilGoly = (tDom === rDom || tHos === rHos);
+                const trefilRozdil = (tipRozdil === realRozdil);
+                if ((trefilGoly || trefilRozdil) && pravidla.chytraTendence > 0) {
+                    ziskaneBody = pravidla.chytraTendence;
+                } else {
+                    ziskaneBody = pravidla.zakladniTendence;
+                }
+            } else if (pravidla.golUtechy > 0 && (tDom === rDom || tHos === rHos)) {
+                ziskaneBody = pravidla.golUtechy;
+            }
         }
     }
 
