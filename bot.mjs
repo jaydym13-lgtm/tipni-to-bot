@@ -627,6 +627,8 @@ async function hydratujDataZFirestore() {
             if (data.datum) {
                 isoDatum = typeof data.datum.toDate === 'function' ? data.datum.toDate().toISOString() : new Date(data.datum).toISOString();
             }
+            const jeHotovoNeboPoVykovu = (data.apiStatus === "FINISHED") || (data.vysledek_domaci !== undefined && data.vysledek_domaci !== null) || (new Date(isoDatum) <= new Date());
+
             RAM_CENTRAL_MATCHES[leagueName][matchId] = {
                 domaci: data.domaci || "Neznámý",
                 hoste: data.hoste || "Neznámý",
@@ -637,15 +639,17 @@ async function hydratujDataZFirestore() {
                 vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : undefined,
                 vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : undefined,
                 apiStatus: data.apiStatus || "SCHEDULED",
-                postup: data.postup || ""
+                postup: data.postup || "",
+                spyUploaded: jeHotovoNeboPoVykovu,
+                spyR2Synced: jeHotovoNeboPoVykovu
             };
         });
     }
 
-    console.log("🚀 Všechna data jsou kompletně v RAM. Spouštím úvodní synchronizaci na R2...");
-    await rekonstruujAgregatyVsechny(true);
+    console.log("🚀 Všechna data jsou kompletně v RAM. Spouštím rychlou startovní synchronizaci...");
+    await rekonstruujAgregatyVsechny(false);
     jeInicializovano = true;
-    console.log("✅ Úvodní synchronizace R2 dokončena. Zapínám reaktivní hlídače.");
+    console.log("✅ Úvodní synchronizace hotova bez zbytečného přepisování historie. Zapínám hlídače.");
 }
 
 function zapniReaktivniSluchatka() {
@@ -1844,8 +1848,10 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         Object.keys(centralMatches).forEach(mId => {
             const zapas = centralMatches[mId];
             const jeOdemceny = zapas && (new Date(zapas.datum) <= new Date() || zapas.vysledek_domaci !== undefined || zapas.apiStatus === "IN_PLAY" || zapas.apiStatus === "FINISHED");
+            const jeLive = zapas && (zapas.apiStatus === "IN_PLAY" || zapas.apiStatus === "PAUSED");
+            const potrebujeUpload = jeOdemceny && (jeLive || !zapas.spyR2Synced);
 
-            if (jeOdemceny) {
+            if (potrebujeUpload) {
                 const tipyProZapasPole = [];
                 Object.keys(RAM_USERS_PROFILES).forEach(uid => {
                     const p = RAM_USERS_PROFILES[uid];
@@ -1869,6 +1875,10 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
 
                 const spyJson = { tipy: tipyProZapasPole, aktualizovano: timestampNow };
                 uploadPromises.push(uploadToR2(leagueName, `spy_zapas_${mId}.json`, spyJson));
+                
+                if (!jeLive && zapas.apiStatus === "FINISHED") {
+                    zapas.spyR2Synced = true;
+                }
             }
         });
 
@@ -1972,9 +1982,11 @@ async function providniApiHeartbeat() {
             const zapasyPole = Object.values(centralZapasy);
 
             for (const [mId, stary] of Object.entries(centralZapasy)) {
+                if (stary.apiStatus === "FINISHED" || stary.spyUploaded) continue;
+
                 const startMs = Date.parse(stary.datum);
                 const isPastKickoff = !isNaN(startMs) && (nyniMs >= startMs);
-                if (isPastKickoff && !stary.spyUploaded) {
+                if (isPastKickoff) {
                     console.log(`🔒 LOCK T-0 [${leagueName}]: Výkop zápasu ${stary.domaci} – ${stary.hoste}. Zmrazuji tipy!`);
                     stary.spyUploaded = true;
                     zmeneneLigySet.add(leagueName);
