@@ -1141,7 +1141,8 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             nejcastejsiVysledekPct: 0,
             uspesnostTendencePct: 0,
             uspesnostPresnePct: 0,
-            smolarSezony: null
+            smolarSezony: null,
+            hrdinaSezony: null
         };
     }
 
@@ -1158,6 +1159,80 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
     let celkemTipuSez = 0;
     let celkemSpravnychTendenci = 0;
     let celkemPresnychTref = 0;
+
+    // ⏱️ PŘESNÉ CHRONOLOGICKÉ ŘAZENÍ ODEHRANÝCH ZÁPASŮ PODLE DATA A ČASU
+    const odehraneZapasyChrono = [...odehraneZapasy].sort((a, b) => (Date.parse(a.datum) || 0) - (Date.parse(b.datum) || 0));
+
+    // 🦸 VÝPOČET NEJDELŠÍ NESTANOVENÉ BODOVÉ ŠŇŮRY PRO KAŽDÉHO HRÁČE
+    const streakMap = {};
+    Object.keys(uzivateleProfily).forEach(uid => {
+        const p = uzivateleProfily[uid];
+        if (!p.leagues || !p.leagues.includes(leagueName)) return;
+
+        const uSouteze = uzivateleTipy[uid] || {};
+        const uSoutezData = uSouteze[ligaKlic] || {};
+        const uTips = uSoutezData.tipy || {};
+
+        let curStreak = 0;
+        let curStreakPts = 0;
+        let bestStreak = 0;
+        let bestStreakPts = 0;
+
+        odehraneZapasyChrono.forEach(zapas => {
+            const uTip = uTips[zapas.id];
+            if (!uTip || uTip.tip_domaci === undefined || uTip.tip_domaci === null || String(uTip.tip_domaci).trim() === '') {
+                curStreak = 0;
+                curStreakPts = 0;
+                return;
+            }
+
+            const tDom = parseInt(uTip.tip_domaci);
+            const tHos = parseInt(uTip.tip_hoste);
+            const rDom = parseInt(zapas.vysledek_domaci);
+            const rHos = parseInt(zapas.vysledek_hoste);
+
+            if (isNaN(tDom) || isNaN(tHos) || isNaN(rDom) || isNaN(rHos)) {
+                curStreak = 0;
+                curStreakPts = 0;
+                return;
+            }
+
+            const body = vypocitejBodyZapasuLocal(tDom, tHos, rDom, rHos, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
+
+            if (body > 0) {
+                curStreak++;
+                curStreakPts += body;
+                if (curStreak > bestStreak || (curStreak === bestStreak && curStreakPts > bestStreakPts)) {
+                    bestStreak = curStreak;
+                    bestStreakPts = curStreakPts;
+                }
+            } else {
+                curStreak = 0;
+                curStreakPts = 0;
+            }
+        });
+
+        if (bestStreak > 0) {
+            streakMap[uid] = { nick: p.nickname, streak: bestStreak, points: bestStreakPts };
+        }
+    });
+
+    let hrdinaSezony = null;
+    const allStreaks = Object.values(streakMap);
+    if (allStreaks.length > 0) {
+        const maxStreak = Math.max(...allStreaks.map(s => s.streak));
+        if (maxStreak > 0) {
+            const topStreakUsers = allStreaks.filter(s => s.streak === maxStreak);
+            const maxPtsInStreak = Math.max(...topStreakUsers.map(s => s.points));
+            const bestHeroes = topStreakUsers.filter(s => s.points === maxPtsInStreak);
+            const heroNicks = bestHeroes.map(h => h.nick).join(", ");
+            hrdinaSezony = {
+                names: heroNicks,
+                pocet: maxStreak,
+                body: maxPtsInStreak
+            };
+        }
+    }
 
     odehraneZapasy.forEach(zapas => {
         const rDom = parseInt(zapas.vysledek_domaci);
@@ -1288,7 +1363,8 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         nejcastejsiVysledekPct: topVysledekPct,
         uspesnostTendencePct: celkemTipuSez > 0 ? Math.round((celkemSpravnychTendenci / celkemTipuSez) * 100) : 0,
         uspesnostPresnePct: celkemTipuSez > 0 ? Math.round((celkemPresnychTref / celkemTipuSez) * 100) : 0,
-        smolarSezony: nejSmolarUid ? { nick: uzivateleProfily[nejSmolarUid]?.nickname, pocet: maxSmula } : null
+        smolarSezony: nejSmolarUid ? { nick: uzivateleProfily[nejSmolarUid]?.nickname, pocet: maxSmula } : null,
+        hrdinaSezony: hrdinaSezony
     };
 }
 
