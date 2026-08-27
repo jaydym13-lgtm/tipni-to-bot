@@ -71,7 +71,7 @@ function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
     });
 
     odehrane.sort((a, b) => (Date.parse(b.datum) || 0) - (Date.parse(a.datum) || 0));
-    const poslednich5 = odehrane.slice(0, 5);
+    const poslednich5 = odehrane.slice(0, 5).reverse(); // 👈 Otočeno: vlevo starší -> vpravo nejnovější (poslední odehraný)
     if (poslednich5.length === 0) return [];
 
     return poslednich5.map(z => {
