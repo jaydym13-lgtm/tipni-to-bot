@@ -1852,31 +1852,6 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         return b.presneVysledkyCount - a.presneVysledkyCount;
     });
 
-    const zebricekLivePole = Object.keys(zebricekMapa).map(uid => {
-        const pOtevrenaKolaLive = otevrenaKolaArr.map(klicKola => ({
-            round: klicKola,
-            points: zebricekMapa[uid].bodyPoKolechLive?.[klicKola] !== undefined ? zebricekMapa[uid].bodyPoKolechLive[klicKola] : (zebricekMapa[uid].bodyPoKolech[klicKola] || 0)
-        })).filter(k => k.points > 0 || otevrenaKolaArr.length === 1);
-
-        return {
-            uid: zebricekMapa[uid].uid, email: zebricekMapa[uid].email, nickname: zebricekMapa[uid].nickname,
-            celkemBodu: zebricekMapa[uid].celkemBoduLive, natipovaneVyhodnocene: zebricekMapa[uid].natipovaneVyhodnoceneLive,
-            nenatipovaneVyhodnocene: zebricekMapa[uid].nenatipovaneVyhodnoceneLive, presneVysledkyCount: zebricekMapa[uid].presneVysledkyCountLive,
-            presneTopMatchesCount: zebricekMapa[uid].presneTopMatchesCountLive || zebricekMapa[uid].presneTopMatchesCount || 0,
-            spravneTendenceCount: zebricekMapa[uid].spravneTendenceCountLive || zebricekMapa[uid].spravneTendenceCount || 0,
-            vyhranaKolaCount: vyhraVKolePocetLive[zebricekMapa[uid].nickname] || vyhraVKolePocet[zebricekMapa[uid].nickname] || 0,
-            perfektniKolaCount: (perfektniKolaSeznam.filter(pk => pk.uid === uid) || []).length,
-            nejviceBoduVKole: zebricekMapa[uid].nejviceBoduVKoleLive || zebricekMapa[uid].nejviceBoduVKole || 0, nejviceBoduVKoleNazev: zebricekMapa[uid].nejviceBoduVKoleNazevLive || zebricekMapa[uid].nejviceBoduVKoleNazev || '–',
-            vitezMs: zebricekMapa[uid].vitezMs, nejStrelec: zebricekMapa[uid].nejStrelec,
-            bodyKoloAktualni: zebricekMapa[uid].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[uid].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[uid].bodyPoKolech[aktivniKolo] || 0),
-            otevrenaKola: pOtevrenaKolaLive,
-            efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[uid].bodyZapasuCelkemLive / maxMoznychBoduZapasu) * 100 : 0
-        };
-    }).sort((a, b) => {
-        if (b.celkemBodu !== a.celkemBodu) return b.celkemBodu - a.celkemBodu;
-        return b.presneVysledkyCount - a.presneVysledkyCount;
-    });
-
     zebricekLivePole.forEach(p => {
         const uid = p.uid;
         if (zebricekMapa[uid] && zebricekMapa[uid].bodyPoKolechLive) {
