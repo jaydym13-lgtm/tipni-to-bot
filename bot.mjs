@@ -2298,6 +2298,66 @@ async function synchronizujRozpisyVsechLig() {
     console.log("✅ Hloubková synchronizace kalendářů dokončena.");
 }
 
+// 🛡️ JEDNORÁZOVÁ PUMPA LOG TÝMŮ: Stáhne odznaky z TheSportsDB a uloží na Cloudflare R2
+async function synchronizujLogaTymu() {
+    console.log("=========================================================================");
+    console.log("🛡️ LOGA TÝMŮ: Spouštím kontrolu a stahování oficiálních odznaků...");
+    console.log("=========================================================================");
+
+    const dbKey = process.env.THESPORTSDB_KEY;
+    if (!dbKey) {
+        console.warn("⚠️ LOGA: Chybí THESPORTSDB_KEY v proměnných!");
+        return;
+    }
+
+    for (const leagueName of SEZNAM_LIG) {
+        const leagueConfig = LIGY_API_MAPA[leagueName];
+        if (!leagueConfig || leagueConfig.provider !== "THESPORTSDB") continue;
+
+        try {
+            const url = `https://www.thesportsdb.com/api/v1/json/${dbKey}/lookup_all_teams.php?id=${leagueConfig.id}`;
+            const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
+            if (!res.ok) continue;
+
+            const data = await res.json();
+            const teams = data?.teams || [];
+
+            for (const team of teams) {
+                const rawName = (team.strTeam || "").replace(/ Prague/g, " Praha");
+                const domaci = slovnikTymu[rawName] || rawName;
+                if (!domaci || !team.strBadge) continue;
+
+                const tymSlug = String(domaci).trim().toLowerCase().replace(/ /g, "_");
+                const r2Key = `teams/${tymSlug}.png`;
+
+                let exists = false;
+                try {
+                    await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: r2Key }));
+                    exists = true;
+                } catch (e) {}
+
+                if (!exists) {
+                    const imgRes = await fetch(team.strBadge, { signal: AbortSignal.timeout(9000) });
+                    if (imgRes.ok) {
+                        const arrayBuffer = await imgRes.arrayBuffer();
+                        await r2Client.send(new PutObjectCommand({
+                            Bucket: BUCKET_NAME,
+                            Key: r2Key,
+                            Body: Buffer.from(arrayBuffer),
+                            ContentType: "image/png",
+                            CacheControl: "public, max-age=31536000, immutable"
+                        }));
+                        console.log(`✅ LOGA: Uloženo logo pro ${domaci} (${r2Key})`);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error(`❌ LOGA [${leagueName}]: Selhalo stažení log:`, err.message);
+        }
+    }
+    console.log("🏁 LOGA: Synchronizace týmových log dokončena.");
+}
+
 // --- 🌐 LIFECYCLE INITIALIZATION BOOTSTRAP ---
 async function startEnterpriseApplication() {
     console.log("=========================================================================");
@@ -2320,6 +2380,14 @@ async function startEnterpriseApplication() {
             synchronizujRozpisyVsechLig().catch(err => console.error("❌ Chyba rozpisů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
             res.end("OK - Synchronizace rozpisů zahájena.");
+            return;
+        }
+
+        if (url === "/sync-team-logos" || url.startsWith("/sync-team-logos")) {
+            console.log(`🛡️ SERVISNÍ PING (/sync-team-logos): Spouštím kontrolu log týmů...`);
+            synchronizujLogaTymu().catch(err => console.error("❌ Chyba log týmů:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Synchronizace log týmů zahájena.");
             return;
         }
 
