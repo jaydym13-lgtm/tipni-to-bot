@@ -2298,10 +2298,10 @@ async function synchronizujRozpisyVsechLig() {
     console.log("✅ Hloubková synchronizace kalendářů dokončena.");
 }
 
-// 🛡️ JEDNORÁZOVÁ PUMPA LOG TÝMŮ: Stáhne odznaky z TheSportsDB a uloží na Cloudflare R2
+// 🛡️ JEDNORÁZOVÁ PUMPA LOG TÝMŮ: Stáhne odznaky z TheSportsDB a uloží na Cloudflare R2 (podle sportu)
 async function synchronizujLogaTymu() {
     console.log("=========================================================================");
-    console.log("🛡️ LOGA TÝMŮ: Spouštím kontrolu a stahování oficiálních odznaků...");
+    console.log("🛡️ LOGA TÝMŮ: Spouštím kontrolu a stahování oficiálních odznaků podle sportu...");
     console.log("=========================================================================");
 
     const dbKey = process.env.THESPORTSDB_KEY;
@@ -2319,9 +2319,12 @@ async function synchronizujLogaTymu() {
         const leagueConfig = LIGY_API_MAPA[leagueName];
         if (!leagueConfig || leagueConfig.provider !== "THESPORTSDB") continue;
 
+        const isHockey = leagueName.includes("hokej") || leagueName.includes("Extraliga");
+        const sportKlic = isHockey ? "ice-hockey" : "football";
+
         try {
             const url = `https://www.thesportsdb.com/api/v1/json/${dbKey}/search_all_teams.php?id=${leagueConfig.id}`;
-            console.log(`🔎 LOGA [${leagueName}]: Dotazuji TheSportsDB API (League ID: ${leagueConfig.id})...`);
+            console.log(`🔎 LOGA [${leagueName} (${sportKlic})]: Dotazuji TheSportsDB API (League ID: ${leagueConfig.id})...`);
             
             const res = await fetch(url, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
             if (!res.ok) {
@@ -2340,7 +2343,7 @@ async function synchronizujLogaTymu() {
                 if (!domaci || !badgeUrl) continue;
 
                 const tymSlug = String(domaci).trim().toLowerCase().replace(/ /g, "_");
-                const r2Key = `teams/${tymSlug}.png`;
+                const r2Key = `teams/${sportKlic}/${tymSlug}.png`;
 
                 let exists = false;
                 try {
@@ -2359,10 +2362,10 @@ async function synchronizujLogaTymu() {
                             ContentType: "image/png",
                             CacheControl: "public, max-age=31536000, immutable"
                         }));
-                        console.log(`✅ LOGA: Uloženo logo pro ${domaci} -> ${r2Key}`);
+                        console.log(`✅ LOGA [${sportKlic}]: Uloženo logo pro ${domaci} -> ${r2Key}`);
                     }
                 } else {
-                    console.log(`🛡️ LOGA: ${domaci} už na R2 existuje.`);
+                    console.log(`🛡️ LOGA [${sportKlic}]: ${domaci} už na R2 existuje.`);
                 }
             }
         } catch (err) {
