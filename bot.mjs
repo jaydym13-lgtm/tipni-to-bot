@@ -2310,22 +2310,34 @@ async function synchronizujLogaTymu() {
         return;
     }
 
+    const browserHeaders = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*"
+    };
+
     for (const leagueName of SEZNAM_LIG) {
         const leagueConfig = LIGY_API_MAPA[leagueName];
         if (!leagueConfig || leagueConfig.provider !== "THESPORTSDB") continue;
 
         try {
-            const url = `https://www.thesportsdb.com/api/v1/json/${dbKey}/lookup_all_teams.php?id=${leagueConfig.id}`;
-            const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
-            if (!res.ok) continue;
+            const url = `https://www.thesportsdb.com/api/v1/json/${dbKey}/search_all_teams.php?id=${leagueConfig.id}`;
+            console.log(`🔎 LOGA [${leagueName}]: Dotazuji TheSportsDB API (League ID: ${leagueConfig.id})...`);
+            
+            const res = await fetch(url, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
+            if (!res.ok) {
+                console.warn(`⚠️ LOGA [${leagueName}]: API status ${res.status}`);
+                continue;
+            }
 
             const data = await res.json();
             const teams = data?.teams || [];
+            console.log(`🔎 LOGA [${leagueName}]: Načteno ${teams.length} týmů.`);
 
             for (const team of teams) {
                 const rawName = (team.strTeam || "").replace(/ Prague/g, " Praha");
                 const domaci = slovnikTymu[rawName] || rawName;
-                if (!domaci || !team.strBadge) continue;
+                const badgeUrl = team.strBadge || team.strTeamBadge;
+                if (!domaci || !badgeUrl) continue;
 
                 const tymSlug = String(domaci).trim().toLowerCase().replace(/ /g, "_");
                 const r2Key = `teams/${tymSlug}.png`;
@@ -2337,7 +2349,7 @@ async function synchronizujLogaTymu() {
                 } catch (e) {}
 
                 if (!exists) {
-                    const imgRes = await fetch(team.strBadge, { signal: AbortSignal.timeout(9000) });
+                    const imgRes = await fetch(badgeUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
                     if (imgRes.ok) {
                         const arrayBuffer = await imgRes.arrayBuffer();
                         await r2Client.send(new PutObjectCommand({
@@ -2347,8 +2359,10 @@ async function synchronizujLogaTymu() {
                             ContentType: "image/png",
                             CacheControl: "public, max-age=31536000, immutable"
                         }));
-                        console.log(`✅ LOGA: Uloženo logo pro ${domaci} (${r2Key})`);
+                        console.log(`✅ LOGA: Uloženo logo pro ${domaci} -> ${r2Key}`);
                     }
+                } else {
+                    console.log(`🛡️ LOGA: ${domaci} už na R2 existuje.`);
                 }
             }
         } catch (err) {
