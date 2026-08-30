@@ -42,19 +42,19 @@ export const PRAVIDLA_LIG = {
         topMatchMultiplier: 2,      // 2x násobič zisku
         roundBonus: 0              // Bez bonusu za celé kolo
     },
-        "Liga národů": {
-            presnyVysledek: 5,
-            chytraTendence: 0,
-            zakladniTendence: 2,
-            golUtechy: 0,
-            playoffBonus: 1,           // +1b bonus v případě remízy a trefení postupu v Play-off / Final Four
-            penaltyNenatipovano: -1,   // -1b za nenatipovaný zápas
-            bonusVitez: 10,             // 🔥 10 bodů za celkového vítěze
-            bonusStrelec: 10,          // 🔥 10 bodů za nejlepšího střelce
-            hasTopMatch: true,         // Mechanika TOP ZÁPASU aktivní
-            topMatchMultiplier: 2,      // 2x násobič zisku
-            roundBonus: 5              // +5 bodů za trefení tendence všech zápasů v kole
-        },
+        "Liga mistrů": {
+        presnyVysledek: 6,
+        chytraTendence: 3,
+        zakladniTendence: 2,
+        golUtechy: 1,
+        playoffBonus: 1,           // +1b bonus v případě remízy a trefení postupu v jarním Play-off
+        penaltyNenatipovano: -1,   // -1b za nenatipovaný zápas
+        bonusVitez: 0,             // ❌ Vypnuto pro LM
+        bonusStrelec: 0,           // ❌ Vypnuto pro LM
+        hasTopMatch: false,        // ❌ Vypnuto pro LM
+        topMatchMultiplier: 1,
+        roundBonus: 0              // ❌ Bez bonusu za celé kolo
+    },
         "MS v hokeji": {
         presnyVysledek: 3,
         chytraTendence: 0,
@@ -160,8 +160,8 @@ export const vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, le
             body += pravidla.playoffBonus;
         }
     }
-    // ⚽ 3. MS VE FOTBALE & PREMIER LEAGUE
-    else if (leagueName === "MS ve fotbale" || leagueName === "Premier League") {
+    // ⚽ 3. MS VE FOTBALE, PREMIER LEAGUE & LIGA MISTRŮ
+    else if (leagueName === "MS ve fotbale" || leagueName === "Premier League" || leagueName === "Liga mistrů") {
         const presny = (tD === rD && tH === rH);
         const spravnaTendence = (tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH);
         const presneGolyJednoho = (tD === rD || tH === rH);
