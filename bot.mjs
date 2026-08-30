@@ -2295,8 +2295,22 @@ async function synchronizujRozpisyVsechLig() {
                 const roundNum = parseInt(item.intRound) || 1;
                 const isPlayoff = item.strStage && item.strStage !== "GROUP_STAGE" && item.strStage !== "REGULAR_SEASON";
 
+                // 🛑 FILTR PRO LIGU MISTRŮ: Zahození letních předkol (chceme pouze hlavní Ligovou fázi a Play-off)
+                if (leagueName === "Liga mistrů") {
+                    const stageStr = String(item.strStage || "").toUpperCase();
+                    const isQualifying = stageStr.includes("QUALIFY") || stageStr.includes("PRELIMINARY");
+                    const datumMs = Date.parse(parsujZapasDatumDoIso(item));
+                    // Ligová fáze začíná až v září (měsíc >= 8 v UTC indexu)
+                    if (isQualifying || (datumMs && new Date(datumMs).getMonth() < 8 && !stageStr.includes("LEAGUE"))) {
+                        continue;
+                    }
+                }
+
                 const matchIsoDate = parsujZapasDatumDoIso(item);
                 let spravneKolo = `${roundNum}. kolo`;
+                if (leagueName === "Liga mistrů" && isPlayoff) {
+                    spravneKolo = "Play-off";
+                }
                 const stary = RAM_CENTRAL_MATCHES[leagueName]?.[apiId];
 
                 const statusRaw = String(item.strStatus || "").trim().toUpperCase();
@@ -2564,6 +2578,24 @@ async function synchronizujGrafikuLig() {
                         CacheControl: "public, max-age=31536000, immutable"
                     }));
                     console.log(`✅ TROFEJ: ${leagueName} -> ${r2TrophyKey}`);
+                }
+            }
+
+            // 1b. Uložení loga soutěže (Badge)
+            const badgeUrl = leagueObj?.strBadge || leagueObj?.strLogo;
+            if (badgeUrl) {
+                const r2BadgeKey = `leagues/logos/${cfg.slug}.png`;
+                const bRes = await fetch(badgeUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
+                if (bRes.ok) {
+                    const bBuf = await bRes.arrayBuffer();
+                    await r2Client.send(new PutObjectCommand({
+                        Bucket: BUCKET_NAME,
+                        Key: r2BadgeKey,
+                        Body: Buffer.from(bBuf),
+                        ContentType: "image/png",
+                        CacheControl: "public, max-age=31536000, immutable"
+                    }));
+                    console.log(`✅ LOGO: ${leagueName} -> ${r2BadgeKey}`);
                 }
             }
 
