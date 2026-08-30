@@ -2010,10 +2010,11 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
 
         Object.values(centralMatches).forEach(z => {
             const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+            const isPostponed = z.apiStatus === "POSTPONED";
             const startMs = Date.parse(z.datum);
 
-            if (!isFinished) {
-                if (z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || (!isNaN(startMs) && startMs <= nyniMs)) {
+            if (!isFinished && !isPostponed) {
+                if (z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED") {
                     ligaBeziLive = true;
                 } else if (!isNaN(startMs) && startMs > nyniMs && startMs < minBudouciMs) {
                     minBudouciMs = startMs;
@@ -2178,18 +2179,6 @@ async function providniApiHeartbeat() {
                           .set({ apiStatus: novyStatus, vysledek_domaci: golyDomaci, vysledek_hoste: golyHoste }, { merge: true })
                           .catch(e => console.error(`❌ Firestore Sync Error:`, e.message));
                     }
-                } else if (isPastKickoff && stary.apiStatus === "SCHEDULED") {
-                    console.log(`🔴 START UTKÁNÍ [${leagueName}]: ${stary.domaci} – ${stary.hoste} odstartoval.`);
-                    stary.apiStatus = "IN_PLAY";
-                    if (stary.vysledek_domaci === undefined) stary.vysledek_domaci = 0;
-                    if (stary.vysledek_hoste === undefined) stary.vysledek_hoste = 0;
-                    zmeneneLigySet.add(leagueName);
-
-                    db.collection("ligy").doc(leagueName)
-                      .collection("sezony").doc(SEZONA_ID)
-                      .collection("zapasy").doc(apiId)
-                      .set({ apiStatus: "IN_PLAY", vysledek_domaci: stary.vysledek_domaci, vysledek_hoste: stary.vysledek_hoste }, { merge: true })
-                      .catch(e => console.error(`❌ Firestore Sync Error:`, e.message));
                 }
             }
         }
@@ -2278,6 +2267,9 @@ async function synchronizujRozpisyVsechLig() {
                 let spravneKolo = `${roundNum}. kolo`;
                 const stary = RAM_CENTRAL_MATCHES[leagueName]?.[apiId];
 
+                const statusRaw = String(item.strStatus || "").trim().toUpperCase();
+                const isPostponed = ["POSTPONED", "PST", "CANCELLED", "SUSPENDED", "ABANDONED"].includes(statusRaw) || String(item.strPostponed || "").toLowerCase() === "yes";
+
                 const matchPayload = {
                     domaci: domaci,
                     hoste: hoste,
@@ -2285,6 +2277,13 @@ async function synchronizujRozpisyVsechLig() {
                     kolo: spravneKolo,
                     isPlayoff: isPlayoff || false
                 };
+
+                if (isPostponed) {
+                    matchPayload.apiStatus = "POSTPONED";
+                } else if (stary?.apiStatus === "POSTPONED" && !isPostponed) {
+                    matchPayload.apiStatus = "SCHEDULED";
+                }
+
                 if (stary?.isTopMatch) matchPayload.isTopMatch = true;
 
                 await db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").doc(apiId).set(matchPayload, { merge: true });
