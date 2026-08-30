@@ -2407,6 +2407,14 @@ async function startEnterpriseApplication() {
             return;
         }
 
+        if (url === "/sync-league-graphics" || url.startsWith("/sync-league-graphics")) {
+            console.log(`🏆 SERVISNÍ PING (/sync-league-graphics): Spouštím synchronizaci trofejí a stadionů...`);
+            synchronizujGrafikuLig().catch(err => console.error("❌ Chyba grafiky:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Synchronizace trofejí a stadionů zahájena.");
+            return;
+        }
+
         if (url === "/sync-odds" || url.startsWith("/sync-odds")) {
             console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím Smart Sync kurzů...`);
             smartSyncKurzu(true).catch(err => console.error("❌ Chyba synchronizace kurzů:", err));
@@ -2474,6 +2482,63 @@ async function startEnterpriseApplication() {
             synchronizujSofaScoreEventMap().catch(err => console.error("❌ Chyba měsíčního mapování:", err));
         }
     }, 5 * 60 * 1000);
+}
+
+// 🏆 PUMPA TROFEJÍ A STADIONŮ: Stáhne oficiální trofeje lig a uloží na Cloudflare R2
+async function synchronizujGrafikuLig() {
+    console.log("=========================================================================");
+    console.log("🏆 GRAFIKA LIG: Stahuji oficiální trofeje a grafické podklady...");
+    console.log("=========================================================================");
+
+    const dbKey = process.env.THESPORTSDB_KEY;
+    if (!dbKey) return;
+
+    const browserHeaders = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+        "Accept": "application/json, text/plain, */*"
+    };
+
+    const leagueKeys = {
+        "Premier League": "premier_league",
+        "Chance Liga": "chance_liga",
+        "Tipsport Extraliga": "extraliga",
+        "MS v hokeji": "ms_hokej",
+        "MS ve fotbale": "ms_fotbal"
+    };
+
+    for (const [leagueName, fileSlug] of Object.entries(leagueKeys)) {
+        const config = LIGY_API_MAPA[leagueName];
+        if (!config || config.provider !== "THESPORTSDB") continue;
+
+        try {
+            const url = `https://www.thesportsdb.com/api/v1/json/${dbKey}/lookupleague.php?id=${config.id}`;
+            const res = await fetch(url, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
+            if (!res.ok) continue;
+
+            const data = await res.json();
+            const leagueObj = data?.leagues?.[0];
+            const trophyUrl = leagueObj?.strTrophy;
+
+            if (trophyUrl) {
+                const r2Key = `leagues/trophies/${fileSlug}.png`;
+                const imgRes = await fetch(trophyUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
+                if (imgRes.ok) {
+                    const buf = await imgRes.arrayBuffer();
+                    await r2Client.send(new PutObjectCommand({
+                        Bucket: BUCKET_NAME,
+                        Key: r2Key,
+                        Body: Buffer.from(buf),
+                        ContentType: "image/png",
+                        CacheControl: "public, max-age=31536000, immutable"
+                    }));
+                    console.log(`✅ TROFEJ: Uložena trofej pro ${leagueName} -> ${r2Key}`);
+                }
+            }
+        } catch (err) {
+            console.error(`❌ GRAFIKA [${leagueName}]: Selhalo stažení:`, err.message);
+        }
+    }
+    console.log("🏁 GRAFIKA: Synchronizace dokončena.");
 }
 
 startEnterpriseApplication();
