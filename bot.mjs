@@ -2286,31 +2286,67 @@ async function synchronizujRozpisyVsechLig() {
             const rawItems = apiData.events || [];
             console.log(`🔎 KALENDÁŘ [${leagueName}]: Načteno ${rawItems.length} zápasů.`);
 
-            for (const item of rawItems) {
+            let itemsToProcess = rawItems;
+
+            // 🧠 ČASOVÝ SHLUKOVAČ PRO LIGU MISTRŮ (8 kol po 18 zápasech + jarní Play-off)
+            if (leagueName === "Liga mistrů") {
+                const filtered = rawItems.filter(item => {
+                    const stageStr = String(item.strStage || "").toUpperCase();
+                    const isQualifying = stageStr.includes("QUALIFY") || stageStr.includes("PRELIMINARY");
+                    const iso = parsujZapasDatumDoIso(item);
+                    const datumMs = Date.parse(iso);
+                    if (isQualifying) return false;
+                    if (datumMs && new Date(datumMs).getMonth() < 8 && !stageStr.includes("LEAGUE")) return false;
+                    return true;
+                });
+
+                filtered.sort((a, b) => {
+                    const tA = Date.parse(parsujZapasDatumDoIso(a)) || 0;
+                    const tB = Date.parse(parsujZapasDatumDoIso(b)) || 0;
+                    return tA - tB;
+                });
+
+                let currentRound = 1;
+                let lastClusterStartMs = 0;
+
+                filtered.forEach(item => {
+                    const iso = parsujZapasDatumDoIso(item);
+                    const matchMs = Date.parse(iso) || 0;
+                    const stageStr = String(item.strStage || "").toUpperCase();
+                    const d = new Date(matchMs);
+                    const isSpringPlayoff = (d.getFullYear() === 2027 && d.getMonth() >= 1) || stageStr.includes("PLAYOFF") || stageStr.includes("KNOCKOUT") || stageStr.includes("ROUND_OF_16") || stageStr.includes("QUARTER") || stageStr.includes("SEMI") || stageStr.includes("FINAL");
+
+                    if (isSpringPlayoff) {
+                        item._customKolo = "Play-off";
+                        item._customIsPlayoff = true;
+                    } else {
+                        if (lastClusterStartMs === 0) {
+                            lastClusterStartMs = matchMs;
+                        } else if (matchMs - lastClusterStartMs > 4 * 24 * 60 * 60 * 1000) {
+                            currentRound++;
+                            lastClusterStartMs = matchMs;
+                        }
+                        item._customKolo = `${currentRound}. kolo`;
+                        item._customIsPlayoff = false;
+                    }
+                });
+
+                itemsToProcess = filtered;
+            }
+
+            for (const item of itemsToProcess) {
                 const apiId = String(item.idEvent);
                 const rawDomaci = (item.strHomeTeam || "Neznámý").replace(/ Prague/g, " Praha");
                 const rawHoste = (item.strAwayTeam || "Neznámý").replace(/ Prague/g, " Praha");
                 const domaci = slovnikTymu[rawDomaci] || rawDomaci;
                 const hoste = slovnikTymu[rawHoste] || rawHoste;
                 const roundNum = parseInt(item.intRound) || 1;
-                const isPlayoff = item.strStage && item.strStage !== "GROUP_STAGE" && item.strStage !== "REGULAR_SEASON";
-
-                // 🛑 FILTR PRO LIGU MISTRŮ: Zahození letních předkol (chceme pouze hlavní Ligovou fázi a Play-off)
-                if (leagueName === "Liga mistrů") {
-                    const stageStr = String(item.strStage || "").toUpperCase();
-                    const isQualifying = stageStr.includes("QUALIFY") || stageStr.includes("PRELIMINARY");
-                    const datumMs = Date.parse(parsujZapasDatumDoIso(item));
-                    // Ligová fáze začíná až v září (měsíc >= 8 v UTC indexu)
-                    if (isQualifying || (datumMs && new Date(datumMs).getMonth() < 8 && !stageStr.includes("LEAGUE"))) {
-                        continue;
-                    }
-                }
+                const isPlayoff = item._customIsPlayoff !== undefined 
+                    ? item._customIsPlayoff 
+                    : (item.strStage && item.strStage !== "GROUP_STAGE" && item.strStage !== "REGULAR_SEASON");
 
                 const matchIsoDate = parsujZapasDatumDoIso(item);
-                let spravneKolo = `${roundNum}. kolo`;
-                if (leagueName === "Liga mistrů" && isPlayoff) {
-                    spravneKolo = "Play-off";
-                }
+                let spravneKolo = item._customKolo || `${roundNum}. kolo`;
                 const stary = RAM_CENTRAL_MATCHES[leagueName]?.[apiId];
 
                 const statusRaw = String(item.strStatus || "").trim().toUpperCase();
