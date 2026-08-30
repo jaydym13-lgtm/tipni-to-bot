@@ -2484,10 +2484,10 @@ async function startEnterpriseApplication() {
     }, 5 * 60 * 1000);
 }
 
-// 🏆 PUMPA TROFEJÍ A STADIONŮ: Stáhne oficiální trofeje lig a uloží na Cloudflare R2
+// 🏆 PUMPA TROFEJÍ A STADIONŮ: Stáhne oficiální trofeje i arény a uloží na Cloudflare R2
 async function synchronizujGrafikuLig() {
     console.log("=========================================================================");
-    console.log("🏆 GRAFIKA LIG: Stahuji oficiální trofeje a grafické podklady...");
+    console.log("🏆 GRAFIKA LIG: Stahuji oficiální trofeje a podklady stadionů...");
     console.log("=========================================================================");
 
     const dbKey = process.env.THESPORTSDB_KEY;
@@ -2499,46 +2499,63 @@ async function synchronizujGrafikuLig() {
     };
 
     const leagueKeys = {
-        "Premier League": "premier_league",
-        "Chance Liga": "chance_liga",
-        "Tipsport Extraliga": "extraliga",
-        "MS v hokeji": "ms_hokej",
-        "MS ve fotbale": "ms_fotbal"
+        "Premier League": { slug: "premier_league", stadiumFallback: "https://www.thesportsdb.com/images/media/league/fanart/1b0s1515779038.jpg" },
+        "Chance Liga": { slug: "chance_liga", stadiumFallback: "https://www.thesportsdb.com/images/media/team/stadium/vqrsuw1420577995.jpg" },
+        "Tipsport Extraliga": { slug: "extraliga", stadiumFallback: "https://www.thesportsdb.com/images/media/team/stadium/9e78ea1578330554.jpg" },
+        "MS v hokeji": { slug: "ms_hokej", stadiumFallback: "https://www.thesportsdb.com/images/media/league/fanart/uwrytu1431627961.jpg" },
+        "MS ve fotbale": { slug: "ms_fotbal", stadiumFallback: "https://www.thesportsdb.com/images/media/league/fanart/wvrwxx1431627993.jpg" }
     };
 
-    for (const [leagueName, fileSlug] of Object.entries(leagueKeys)) {
+    for (const [leagueName, cfg] of Object.entries(leagueKeys)) {
         const config = LIGY_API_MAPA[leagueName];
         if (!config || config.provider !== "THESPORTSDB") continue;
 
         try {
             const url = `https://www.thesportsdb.com/api/v1/json/${dbKey}/lookupleague.php?id=${config.id}`;
             const res = await fetch(url, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
-            if (!res.ok) continue;
-
-            const data = await res.json();
+            const data = res.ok ? await res.json() : null;
             const leagueObj = data?.leagues?.[0];
-            const trophyUrl = leagueObj?.strTrophy;
 
+            // 1. Uložení trofeje
+            const trophyUrl = leagueObj?.strTrophy;
             if (trophyUrl) {
-                const r2Key = `leagues/trophies/${fileSlug}.png`;
+                const r2TrophyKey = `leagues/trophies/${cfg.slug}.png`;
                 const imgRes = await fetch(trophyUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
                 if (imgRes.ok) {
                     const buf = await imgRes.arrayBuffer();
                     await r2Client.send(new PutObjectCommand({
                         Bucket: BUCKET_NAME,
-                        Key: r2Key,
+                        Key: r2TrophyKey,
                         Body: Buffer.from(buf),
                         ContentType: "image/png",
                         CacheControl: "public, max-age=31536000, immutable"
                     }));
-                    console.log(`✅ TROFEJ: Uložena trofej pro ${leagueName} -> ${r2Key}`);
+                    console.log(`✅ TROFEJ: ${leagueName} -> ${r2TrophyKey}`);
+                }
+            }
+
+            // 2. Uložení fotky stadionu / fanartu
+            const stadiumUrl = leagueObj?.strFanart1 || leagueObj?.strPoster || cfg.stadiumFallback;
+            if (stadiumUrl) {
+                const r2StadiumKey = `leagues/stadiums/${cfg.slug}.webp`;
+                const sRes = await fetch(stadiumUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
+                if (sRes.ok) {
+                    const sBuf = await sRes.arrayBuffer();
+                    await r2Client.send(new PutObjectCommand({
+                        Bucket: BUCKET_NAME,
+                        Key: r2StadiumKey,
+                        Body: Buffer.from(sBuf),
+                        ContentType: "image/webp",
+                        CacheControl: "public, max-age=31536000, immutable"
+                    }));
+                    console.log(`🏟️ STADION: ${leagueName} -> ${r2StadiumKey}`);
                 }
             }
         } catch (err) {
             console.error(`❌ GRAFIKA [${leagueName}]: Selhalo stažení:`, err.message);
         }
     }
-    console.log("🏁 GRAFIKA: Synchronizace dokončena.");
+    console.log("🏁 GRAFIKA: Synchronizace trofejí i stadionů dokončena.");
 }
 
 startEnterpriseApplication();
