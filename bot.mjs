@@ -19,7 +19,8 @@ const LIGY_API_MAPA = {
     "Premier League": { id: "4328", provider: "THESPORTSDB" },
     "MS ve fotbale": { id: "4429", provider: "THESPORTSDB" },
     "Tipsport Extraliga": { id: "4923", provider: "THESPORTSDB" },
-    "MS v hokeji": { id: "4859", provider: "THESPORTSDB" }
+    "MS v hokeji": { id: "4859", provider: "THESPORTSDB" },
+    "Liga mistrů": { id: "4480", provider: "THESPORTSDB" }
 };
 
 // Seznam lig, které má bot v tomto běhu živě obsluhovat
@@ -101,7 +102,8 @@ const ODDS_R2_KEY = `sezony/${SEZONA_ID}/central_odds.json`;
 const SOFASCORE_TOURNAMENTS = {
     "Chance Liga": { id: 49, seasonId: 96966, sport: "football" },
     "Premier League": { id: 1, seasonId: 96668, sport: "football" },
-    "Tipsport Extraliga": { id: 109, seasonId: 96126, sport: "ice-hockey" }
+    "Tipsport Extraliga": { id: 109, seasonId: 96126, sport: "ice-hockey" },
+    "Liga mistrů": { id: 7, seasonId: 96518, sport: "football" }
 };
 
 function prevedZlomekNaKurz(fraction) {
@@ -470,7 +472,37 @@ const slovnikTymu = {
     "HC Škoda Plzeň": "Plzeň", "HC Skoda Plzen": "Plzeň",
     "HC Energie Karlovy Vary": "K. Vary", "Energie Karlovy Vary": "K. Vary", "Karlovy Vary": "K. Vary",
     "Rytíři Kladno": "Kladno", "Rytiri Kladno": "Kladno",
-    "Banes Motor České Budějovice": "Č. Budějovice", "HC Motor České Budějovice": "Č. Budějovice", "Motor České Budějovice": "Č. Budějovice"
+    "Banes Motor České Budějovice": "Č. Budějovice", "HC Motor České Budějovice": "Č. Budějovice", "Motor České Budějovice": "Č. Budějovice",
+    // 🏆 LIGA MISTRŮ (UEFA CHAMPIONS LEAGUE)
+    "Real Madrid CF": "Real Madrid", "Real Madrid": "Real Madrid",
+    "FC Barcelona": "Barcelona", "Barcelona": "Barcelona",
+    "FC Bayern München": "Bayern", "Bayern Munich": "Bayern", "Bayern München": "Bayern", "Bayern": "Bayern",
+    "Paris Saint-Germain": "PSG", "Paris Saint Germain": "PSG", "Paris SG": "PSG", "PSG": "PSG",
+    "FC Internazionale Milano": "Inter", "Inter Milan": "Inter", "Inter": "Inter",
+    "Juventus FC": "Juventus", "Juventus": "Juventus",
+    "AC Milan": "AC Milán", "Milan": "AC Milán",
+    "Atalanta BC": "Atalanta", "Atalanta": "Atalanta",
+    "Bologna FC 1909": "Bologna", "Bologna": "Bologna",
+    "Borussia Dortmund": "Dortmund", "Bayer 04 Leverkusen": "Leverkusen", "Bayer Leverkusen": "Leverkusen", "Leverkusen": "Leverkusen",
+    "RB Leipzig": "Lipsko", "RasenBallsport Leipzig": "Lipsko", "Stuttgart": "Stuttgart", "VfB Stuttgart": "Stuttgart",
+    "Atlético Madrid": "Atlético", "Atletico Madrid": "Atlético", "Club Atlético de Madrid": "Atlético",
+    "Girona FC": "Girona", "Girona": "Girona",
+    "Sporting CP": "Sporting", "Sporting Lisbon": "Sporting", "Sporting Clube de Portugal": "Sporting",
+    "SL Benfica": "Benfica", "Benfica": "Benfica",
+    "Feyenoord Rotterdam": "Feyenoord", "Feyenoord": "Feyenoord",
+    "PSV Eindhoven": "PSV", "PSV": "PSV",
+    "Club Brugge KV": "Bruggy", "Club Brugge": "Bruggy", "Brugge": "Bruggy",
+    "Celtic FC": "Celtic", "Celtic": "Celtic",
+    "AS Monaco FC": "Monaco", "AS Monaco": "Monaco", "Monaco": "Monaco",
+    "Stade Brestois 29": "Brest", "Stade Brestois": "Brest", "Brest": "Brest",
+    "Lille OSC": "Lille", "Lille": "Lille",
+    "SK Sturm Graz": "Sturm Graz", "Sturm Graz": "Sturm Graz",
+    "FC Salzburg": "Salcburk", "Red Bull Salzburg": "Salcburk", "Salzburg": "Salcburk",
+    "GNK Dinamo Zagreb": "Dinamo Záhřeb", "Dinamo Zagreb": "Dinamo Záhřeb",
+    "FK Crvena Zvezda": "Crvena Zvezda", "Red Star Belgrade": "Crvena Zvezda",
+    "ŠK Slovan Bratislava": "Slovan Bratislava", "Slovan Bratislava": "Slovan Bratislava",
+    "BSC Young Boys": "Young Boys", "Young Boys": "Young Boys",
+    "FC Shakhtar Donetsk": "Šachtar", "Shakhtar Donetsk": "Šachtar"
 };
 
 const PL_NORM = (str) => String(str || '').toLowerCase().trim();
@@ -2503,7 +2535,8 @@ async function synchronizujGrafikuLig() {
         "Chance Liga": { slug: "chance_liga", stadiumFallback: "https://www.thesportsdb.com/images/media/team/stadium/vqrsuw1420577995.jpg" },
         "Tipsport Extraliga": { slug: "extraliga", stadiumFallback: "https://www.thesportsdb.com/images/media/team/stadium/9e78ea1578330554.jpg" },
         "MS v hokeji": { slug: "ms_hokej", stadiumFallback: "https://www.thesportsdb.com/images/media/league/fanart/uwrytu1431627961.jpg" },
-        "MS ve fotbale": { slug: "ms_fotbal", stadiumFallback: "https://www.thesportsdb.com/images/media/league/fanart/wvrwxx1431627993.jpg" }
+        "MS ve fotbale": { slug: "ms_fotbal", stadiumFallback: "https://www.thesportsdb.com/images/media/league/fanart/wvrwxx1431627993.jpg" },
+        "Liga mistrů": { slug: "liga_mistru", stadiumFallback: "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1600&auto=format&fit=crop" }
     };
 
     for (const [leagueName, cfg] of Object.entries(leagueKeys)) {
