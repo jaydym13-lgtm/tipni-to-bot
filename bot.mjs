@@ -2530,27 +2530,11 @@ async function startEnterpriseApplication() {
 
     await nactiKurzyZR2();
     zapniReaktivniSluchatka();
-    // 📊 Startovní Smart Sync (stáhne pouze pokud v R2/RAM data pro aktuální dny chybí)
-    smartSyncKurzu(false).catch(err => console.error("⚠️ Startovní Smart Sync selhal:", err));
-
-    // ⏱️ SMYČKA 1: 30s kontrola live výsledků
+    // ⏱️ SMYČKA 1: 30s kontrola live výsledků (Kurzy se stahují POUZE přes signál /sync-odds v pondělí)
     console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím 30s smyčku pro live výsledky...");
     setInterval(() => {
         providniApiHeartbeat().catch(err => console.error("❌ Chyba interního Heartbeatu:", err));
     }, 30000);
-
-    // 🌅 SMYČKA 2: Smart Sync kurzů (Běží VÝHRADNĚ 1× týdně v PONDĚLÍ v 15:00 pro okno Po–Po)
-    setInterval(() => {
-        const d = new Date();
-        const denVTydnu = d.getDay(); // 1 = pondělí
-        const hodina = d.getHours();
-        const minuta = d.getMinutes();
-
-        if (denVTydnu === 1 && hodina === 15 && minuta < 5) {
-            console.log("⏰ ČASOVÝ TRIGGER: Spouštím pondělní týdenní synchronizaci kurzů (okno Po–Po)...");
-            smartSyncKurzu().catch(err => console.error("❌ Chyba plánovaného Smart Syncu:", err));
-        }
-    }, 5 * 60 * 1000);
 
     // 🗺️ SMYČKA 3: Měsíční mapování ID (1. den v měsíci ve 02:00 ráno)
     setInterval(() => {
