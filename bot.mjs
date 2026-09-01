@@ -104,10 +104,10 @@ const ODDS_R2_KEY = `sezony/${SEZONA_ID}/central_odds.json`;
 
 // Číselník turnajů na SofaScore s přesnými ID turnajů a sezón
 const SOFASCORE_TOURNAMENTS = {
-    "Chance Liga": { id: 49, seasonId: 96966, sport: "football" },
-    "Premier League": { id: 1, seasonId: 96668, sport: "football" },
-    "Tipsport Extraliga": { id: 109, seasonId: 96126, sport: "ice-hockey" },
-    "Liga mistrů": { id: 7, seasonId: 96518, sport: "football" }
+    "Chance Liga": { id: 49, seasonId: 96966, sport: "football", isUnique: false },
+    "Premier League": { id: 1, seasonId: 96668, sport: "football", isUnique: false },
+    "Tipsport Extraliga": { id: 109, seasonId: 96126, sport: "ice-hockey", isUnique: false },
+    "Liga mistrů": { id: 7, seasonId: 96518, sport: "football", isUnique: true }
 };
 
 function prevedZlomekNaKurz(fraction) {
@@ -164,7 +164,8 @@ async function synchronizujSofaScoreEventMap() {
 
     for (const [leagueName, cfg] of Object.entries(SOFASCORE_TOURNAMENTS)) {
         try {
-            const url = `https://sportapi7.p.rapidapi.com/api/v1/unique-tournament/${cfg.id}/season/${cfg.seasonId}/events/next/0`;
+            const prefix = cfg.isUnique ? "unique-tournament" : "tournament";
+            const url = `https://sportapi7.p.rapidapi.com/api/v1/${prefix}/${cfg.id}/season/${cfg.seasonId}/events/next/0`;
             const res = await fetch(url, {
                 headers: {
                     "x-rapidapi-key": RAPIDAPI_KEY,
