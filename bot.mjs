@@ -2044,16 +2044,21 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         await uploadToR2(leagueName, "rozpis.json", rozpisJson);
         await rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches);
 
-        try {
-            const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
-            await pulsRef.set({
-                verzeRozpisu: admin.firestore.FieldValue.increment(1),
-                verzeZebricku: admin.firestore.FieldValue.increment(1),
-                aktualizovano: admin.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-            console.log(`📡 PULS SYNC [${leagueName}]: Změna dat detekována -> Firestore puls aktualizován.`);
-        } catch (pulsErr) {
-            console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
+        // 🛡️ Zápis pulsu se provede VÝHRADNĚ tehdy, pokud se reálně změnila data (ne kvůli historii!)
+        if (dataSeZmenila) {
+            try {
+                const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
+                await pulsRef.set({
+                    verzeRozpisu: admin.firestore.FieldValue.increment(1),
+                    verzeZebricku: admin.firestore.FieldValue.increment(1),
+                    aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                console.log(`📡 PULS SYNC [${leagueName}]: Změna dat detekována -> Firestore puls aktualizován.`);
+            } catch (pulsErr) {
+                console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
+            }
+        } else {
+            console.log(`🛡️ HISTORIE SYNC [${leagueName}]: Zpracována událost bez změny dat (0 Firestore puls).`);
         }
     }
 
