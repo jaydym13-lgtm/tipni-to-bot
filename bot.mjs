@@ -2025,7 +2025,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         aktualizovano: timestampNow 
     };
 
-    // 🛡️ KONTROLA OTISKU: Čistý a stabilní otisk z reálných herních dat (žádná dynamická časová razítka)
+    // 🛡️ KONTROLA OTISKU: Čistý a stabilní otisk z reálných herních dat (včetně kurzů 1-X-2)
     const cistaDataZapasu = Object.entries(centralMatches).map(([id, z]) => 
         `${id}:${z.datum}_${z.vysledek_domaci}_${z.vysledek_hoste}_${z.apiStatus}_${z.isTopMatch}_${z.postup}`
     ).sort().join('|');
@@ -2034,7 +2034,11 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         `${p.uid}:${p.celkemBodu}_${p.presneVysledkyCount}_${p.spravneTendenceCount}_${p.celkemBoduLive}`
     ).sort().join('|');
 
-    const aktualniOtisk = `${cistaDataZapasu}#${cisteBodyTabulky}#${liveMatchIds.length > 0}`;
+    const cistaKurzyOtisk = Object.entries(RAM_CENTRAL_ODDS[leagueName] || {}).map(([k, o]) => 
+        `${k}:${o["1"]}_${o["X"]}_${o["2"]}`
+    ).sort().join('|');
+
+    const aktualniOtisk = `${cistaDataZapasu}#${cisteBodyTabulky}#${cistaKurzyOtisk}#${liveMatchIds.length > 0}`;
 
     const dataSeZmenila = (RAM_LAST_DATA_SIGNATURES[leagueName] !== aktualniOtisk);
 
@@ -2672,16 +2676,16 @@ async function startEnterpriseApplication() {
         console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen pro Render.`);
     });
 
-    await hydratujDataZFirestore();
+    // 1. Nejprve načteme mapu ID a existující kurzy z R2 do RAM
     await nactiEventMapZR2();
-
-    // 🛡️ Pokud mapa ID na R2 ještě neexistuje, ihned ji stáhneme a založíme
     if (Object.keys(RAM_EVENT_MAP).length === 0) {
         console.log("🗺️ INICIALIZACE: event_map.json na R2 chybí, stahuji a ukládám novou mapu...");
         await synchronizujSofaScoreEventMap();
     }
-
     await nactiKurzyZR2();
+
+    // 2. Teprve s plnou kurzovou pamětí provedeme startovní hydrataci a generování rozpisů
+    await hydratujDataZFirestore();
     zapniReaktivniSluchatka();
     // ⏱️ SMYČKA 1: 30s kontrola live výsledků (Kurzy se stahují POUZE přes signál /sync-odds v pondělí)
     console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím 30s smyčku pro live výsledky...");
