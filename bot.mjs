@@ -2351,6 +2351,9 @@ async function synchronizujRozpisyVsechLig() {
 
                 const statusRaw = String(item.strStatus || "").trim().toUpperCase();
                 const isPostponed = ["POSTPONED", "PST", "CANCELLED", "SUSPENDED", "ABANDONED"].includes(statusRaw) || String(item.strPostponed || "").toLowerCase() === "yes";
+                const isFinishedApi = ["MATCH FINISHED", "FT", "AOT", "AP", "FINISHED", "FULL TIME", "ENDED"].includes(statusRaw);
+                const hasScoreApi = item.intHomeScore !== null && item.intHomeScore !== undefined && String(item.intHomeScore).trim() !== "" &&
+                                    item.intAwayScore !== null && item.intAwayScore !== undefined && String(item.intAwayScore).trim() !== "";
 
                 const matchPayload = {
                     domaci: domaci,
@@ -2360,7 +2363,17 @@ async function synchronizujRozpisyVsechLig() {
                     isPlayoff: isPlayoff || false
                 };
 
-                if (isPostponed) {
+                // 🛡️ OCHRANA: Pokud zápas v DB ještě NENÍ uzavřený, ale API už má finální skóre (FT), bezpečně dotáhneme výsledek
+                const uzJeUzavrenyVDB = (stary?.apiStatus === "FINISHED") || (stary?.vysledek_domaci !== undefined && stary?.vysledek_domaci !== null && stary?.apiStatus !== "IN_PLAY" && stary?.apiStatus !== "PAUSED");
+
+                if (!uzJeUzavrenyVDB && isFinishedApi && hasScoreApi) {
+                    const gDom = parseInt(item.intHomeScore, 10);
+                    const gHos = parseInt(item.intAwayScore, 10);
+                    matchPayload.apiStatus = "FINISHED";
+                    matchPayload.vysledek_domaci = gDom;
+                    matchPayload.vysledek_hoste = gHos;
+                    console.log(`🛡️ KALENDÁŘ FALLBACK [${leagueName}]: Záchrana výsledku pro ${domaci} ${gDom}:${gHos} ${hoste} (FINISHED)`);
+                } else if (isPostponed) {
                     matchPayload.apiStatus = "POSTPONED";
                 } else if (stary?.apiStatus === "POSTPONED" && !isPostponed) {
                     matchPayload.apiStatus = "SCHEDULED";
