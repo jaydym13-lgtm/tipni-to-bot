@@ -164,7 +164,7 @@ async function synchronizujSofaScoreEventMap() {
 
     for (const [leagueName, cfg] of Object.entries(SOFASCORE_TOURNAMENTS)) {
         try {
-            const url = `https://sportapi7.p.rapidapi.com/api/v1/tournament/${cfg.id}/season/${cfg.seasonId}/events/next/0`;
+            const url = `https://sportapi7.p.rapidapi.com/api/v1/unique-tournament/${cfg.id}/season/${cfg.seasonId}/events/next/0`;
             const res = await fetch(url, {
                 headers: {
                     "x-rapidapi-key": RAPIDAPI_KEY,
