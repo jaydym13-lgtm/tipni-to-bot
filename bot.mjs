@@ -2394,7 +2394,12 @@ async function synchronizujRozpisyVsechLig() {
                         const iso = parsujZapasDatumDoIso(item);
                         const datumMs = Date.parse(iso);
                         if (isQualifying) return false;
-                        if (datumMs && new Date(datumMs).getMonth() < 8 && !stageStr.includes("LEAGUE")) return false;
+                        // 🛡️ Filtrujeme POUZE letní předkola z roku 2026 (před 1. 9. 2026), Leden 2027 (7. a 8. kolo) necháváme projít!
+                        if (datumMs) {
+                            const d = new Date(datumMs);
+                            const isSummer2026 = (d.getFullYear() === 2026 && d.getMonth() < 8);
+                            if (isSummer2026 && !stageStr.includes("LEAGUE")) return false;
+                        }
                         return true;
                     });
 
