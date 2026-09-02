@@ -326,36 +326,51 @@ async function ulozKurzyDoR2() {
     }
 }
 
-// 🧠 SMART SYNC PLÁNOVAČ: DVOUVLNNÝ ROZŠTĚP TÝDNE (Všední dny Po–Čt vs. Víkend Pá–Po)
+// 🧠 SMART SYNC PLÁNOVAČ: 3FÁZOVÝ TÝDENNÍ CYKLUS BEZ MRTVÝCH OKEN
+// Úterý 17:00 -> Víkend (Pá–Po)
+// Sobota 04:00 -> Všední dny (Út–Čt, předstih LM)
+// Pondělí 04:00 -> Všední dny (Út–Čt, dočištění dohrávek)
 async function smartSyncKurzu() {
     const nyni = new Date();
     const denVTydnu = nyni.getDay(); // 0 = neděle, 1 = pondělí, 2 = úterý, 3 = středa, 4 = čtvrtek, 5 = pátek, 6 = sobota
 
-    // 🎯 URČENÍ CÍLOVÉHO HERNÍHO BLOKU:
-    // Pondělí (1) & Úterý (2) -> VLNA 1: Všední dny (Dohrávky ligy + Liga mistrů: Út, St, Čt do 23:59)
-    // Středa (3) až Neděle (0) -> VLNA 2: Víkendový blok (Pátek, Sobota, Neděle, Pondělí do 23:59)
-    const konecBloku = new Date(nyni);
+    let startBloku = new Date(nyni);
+    let konecBloku = new Date(nyni);
 
-    if (denVTydnu === 1 || denVTydnu === 2) {
-        // Po–Út: Díváme se maximálně do Čtvrtka 23:59
-        const dnyDoCtvrtka = (4 - denVTydnu);
+    // 🎯 ROZLIŠENÍ BLOKŮ:
+    // So (6), Ne (0), Po (1) -> Cíl: Všední dny (Úterý 00:00 až Čtvrtek 23:59)
+    // Út (2), St (3), Čt (4), Pá (5) -> Cíl: Víkendový blok (Pátek 00:00 až Pondělí 23:59)
+    if (denVTydnu === 6 || denVTydnu === 0 || denVTydnu === 1) {
+        const dnyDoUtery = (denVTydnu === 6 ? 3 : (denVTydnu === 0 ? 2 : 1));
+        const dnyDoCtvrtka = dnyDoUtery + 2;
+
+        startBloku.setDate(nyni.getDate() + dnyDoUtery);
+        startBloku.setHours(0, 0, 0, 0);
+
         konecBloku.setDate(nyni.getDate() + dnyDoCtvrtka);
+        konecBloku.setHours(23, 59, 59, 999);
     } else {
-        // St–Ne: Díváme se do příštího Pondělí 23:59
-        // Středa (3) -> +5 dní, Čtvrtek (4) -> +4 dny, Pátek (5) -> +3 dny, Sobota (6) -> +2 dny, Neděle (0) -> +1 den
-        const dnyDoPondeli = (denVTydnu === 0 ? 1 : (8 - denVTydnu));
-        konecBloku.setDate(nyni.getDate() + dnyDoPondeli);
-    }
-    konecBloku.setHours(23, 59, 59, 999);
+        const dnyDoPatku = (5 - denVTydnu);
+        const dnyDoPondeli = dnyDoPatku + 3;
 
-    // Min: Pouze zápasy od této chvíle (s 2h rezervou pro právě začínající)
-    const minTargetMs = nyni.getTime() - (2 * 60 * 60 * 1000);
+        if (denVTydnu === 5) {
+            startBloku = new Date(nyni.getTime() - (2 * 60 * 60 * 1000));
+        } else {
+            startBloku.setDate(nyni.getDate() + dnyDoPatku);
+            startBloku.setHours(0, 0, 0, 0);
+        }
+
+        konecBloku.setDate(nyni.getDate() + dnyDoPondeli);
+        konecBloku.setHours(23, 59, 59, 999);
+    }
+
+    const minTargetMs = startBloku.getTime();
     const maxTargetMs = konecBloku.getTime();
 
-    const datumDnesStr = nyni.toISOString().split("T")[0];
+    const datumStartStr = startBloku.toISOString().split("T")[0];
     const datumKonecStr = konecBloku.toISOString().split("T")[0];
 
-    console.log(`📅 SMART SYNC: Kontroluji herní blok (${datumDnesStr} až ${datumKonecStr})...`);
+    console.log(`📅 SMART SYNC: Kontroluji herní blok (${datumStartStr} až ${datumKonecStr})...`);
 
     const dnyKeStazeni = { football: new Set(), "ice-hockey": new Set() };
 
