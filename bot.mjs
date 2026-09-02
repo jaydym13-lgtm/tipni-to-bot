@@ -1912,6 +1912,25 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const otevrenaKolaStatistiky = otevrenaKolaArr.map(klicKola => {
         const vsechnyZiskyVKole = Object.keys(zebricekMapa).map(uid => {
             const stats = zebricekMapa[uid];
+            const pts = stats.bodyPoKolech[klicKola] || 0;
+            return { nickname: stats.nickname, points: pts };
+        }).filter(p => p.points > 0);
+
+        const unikatniPts = [...new Set(vsechnyZiskyVKole.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+        const top3 = unikatniPts.map(points => {
+            const nicks = vsechnyZiskyVKole.filter(p => p.points === points).map(p => p.nickname);
+            return { points, names: nicks.join(', ') };
+        });
+
+        return {
+            round: klicKola,
+            top3: top3
+        };
+    });
+
+    const otevrenaKolaStatistikyLive = otevrenaKolaArr.map(klicKola => {
+        const vsechnyZiskyVKole = Object.keys(zebricekMapa).map(uid => {
+            const stats = zebricekMapa[uid];
             const pts = stats.bodyPoKolechLive?.[klicKola] !== undefined ? stats.bodyPoKolechLive[klicKola] : (stats.bodyPoKolech[klicKola] || 0);
             return { nickname: stats.nickname, points: pts };
         }).filter(p => p.points > 0);
@@ -2015,6 +2034,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         top3PresneTopLive: top3PresneTopLive,
         top3KolaLive: top3KolaLive,
         otevrenaKolaStatistiky: otevrenaKolaStatistiky,
+        otevrenaKolaStatistikyLive: otevrenaKolaStatistikyLive,
         otevrenaKolaSeznam: otevrenaKolaArr,
         aktivniKoloText: aktivniKolo,
         radar: radarStats,
