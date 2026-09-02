@@ -326,27 +326,36 @@ async function ulozKurzyDoR2() {
     }
 }
 
-// 🧠 SMART SYNC PLÁNOVAČ: POUZE BUDOUCÍ ZÁPASY V AKTUÁLNÍM TÝDENNÍM BLOKU (DO PONDĚLÍ 23:59)
+// 🧠 SMART SYNC PLÁNOVAČ: DVOUVLNNÝ ROZŠTĚP TÝDNE (Všední dny Po–Čt vs. Víkend Pá–Po)
 async function smartSyncKurzu() {
     const nyni = new Date();
-    const denVTydnu = nyni.getDay(); // 0 = neděle, 1 = pondělí ... 6 = sobota
+    const denVTydnu = nyni.getDay(); // 0 = neděle, 1 = pondělí, 2 = úterý, 3 = středa, 4 = čtvrtek, 5 = pátek, 6 = sobota
 
-    // Dny zbývající do konce aktuálního herního týdne (do příštího pondělí 23:59)
-    // Pokud je dnes pondělí (1), díváme se 7 dní dopředu. Pokud je středa (3), 5 dní dopředu.
-    const dnyDoPondeli = (denVTydnu === 1 ? 7 : (8 - denVTydnu) % 7);
-
+    // 🎯 URČENÍ CÍLOVÉHO HERNÍHO BLOKU:
+    // Pondělí (1) & Úterý (2) -> VLNA 1: Všední dny (Dohrávky ligy + Liga mistrů: Út, St, Čt do 23:59)
+    // Středa (3) až Neděle (0) -> VLNA 2: Víkendový blok (Pátek, Sobota, Neděle, Pondělí do 23:59)
     const konecBloku = new Date(nyni);
-    konecBloku.setDate(nyni.getDate() + dnyDoPondeli);
+
+    if (denVTydnu === 1 || denVTydnu === 2) {
+        // Po–Út: Díváme se maximálně do Čtvrtka 23:59
+        const dnyDoCtvrtka = (4 - denVTydnu);
+        konecBloku.setDate(nyni.getDate() + dnyDoCtvrtka);
+    } else {
+        // St–Ne: Díváme se do příštího Pondělí 23:59
+        // Středa (3) -> +5 dní, Čtvrtek (4) -> +4 dny, Pátek (5) -> +3 dny, Sobota (6) -> +2 dny, Neděle (0) -> +1 den
+        const dnyDoPondeli = (denVTydnu === 0 ? 1 : (8 - denVTydnu));
+        konecBloku.setDate(nyni.getDate() + dnyDoPondeli);
+    }
     konecBloku.setHours(23, 59, 59, 999);
 
-    // Min: Pouze zápasy od této chvíle (ignorujeme minulost týdne)
-    const minTargetMs = nyni.getTime() - (2 * 60 * 60 * 1000); // 2h rezerva pro právě začínající
+    // Min: Pouze zápasy od této chvíle (s 2h rezervou pro právě začínající)
+    const minTargetMs = nyni.getTime() - (2 * 60 * 60 * 1000);
     const maxTargetMs = konecBloku.getTime();
 
     const datumDnesStr = nyni.toISOString().split("T")[0];
     const datumKonecStr = konecBloku.toISOString().split("T")[0];
 
-    console.log(`📅 SMART SYNC: Kontroluji nadcházející zápasy týdne (${datumDnesStr} až ${datumKonecStr})...`);
+    console.log(`📅 SMART SYNC: Kontroluji herní blok (${datumDnesStr} až ${datumKonecStr})...`);
 
     const dnyKeStazeni = { football: new Set(), "ice-hockey": new Set() };
 
