@@ -47,7 +47,7 @@ export const PRAVIDLA_LIG = {
         chytraTendence: 3,
         zakladniTendence: 2,
         golUtechy: 1,
-        playoffBonus: 1,           // +1b bonus v případě remízy a trefení postupu v jarním Play-off
+        playoffBonus: 0,           // ❌ Vypnuto pro LM (tipuje se čistě po 90 minutách)
         penaltyNenatipovano: -1,   // -1b za nenatipovaný zápas
         bonusVitez: 0,             // ❌ Vypnuto pro LM
         bonusStrelec: 0,           // ❌ Vypnuto pro LM
