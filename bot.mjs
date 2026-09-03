@@ -2465,7 +2465,7 @@ async function synchronizujRozpisyVsechLig() {
 
                         if (isSpringPlayoff) {
                             item._customKolo = "Play-off";
-                            item._customIsPlayoff = true;
+                            item._customIsPlayoff = false; // 👈 Pro LM tipujeme pouze 90 minut, vyřazovací příznak se nezapíná
                         } else {
                             if (lastClusterStartMs === 0) {
                                 lastClusterStartMs = matchMs;
