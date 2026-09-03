@@ -1688,11 +1688,11 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     });
 
     const kolaZapasyMap = {};
-    Object.values(centralMatches).forEach(z => {
+    Object.entries(centralMatches).forEach(([mId, z]) => {
         if (z.kolo) {
             const k = String(z.kolo).trim();
             if (!kolaZapasyMap[k]) kolaZapasyMap[k] = [];
-            kolaZapasyMap[k].push(z);
+            kolaZapasyMap[k].push({ ...z, id: mId, matchId: mId });
         }
     });
 
@@ -1710,30 +1710,6 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                 otevrenaKolaSet.add(klicKola);
             }
         }
-    });
-
-    Object.keys(zebricekMapa).forEach(uid => {
-        let maxPts = 0;
-        let maxKolo = '–';
-        Object.entries(zebricekMapa[uid].bodyPoKolech).forEach(([klicKola, pts]) => {
-            if (pts > maxPts) {
-                maxPts = pts;
-                maxKolo = klicKola;
-            }
-        });
-        zebricekMapa[uid].nejviceBoduVKole = maxPts;
-        zebricekMapa[uid].nejviceBoduVKoleNazev = maxKolo;
-
-        let maxPtsLive = 0;
-        let maxKoloLive = '–';
-        Object.entries(zebricekMapa[uid].bodyPoKolechLive || {}).forEach(([klicKola, pts]) => {
-            if (pts > maxPtsLive) {
-                maxPtsLive = pts;
-                maxKoloLive = klicKola;
-            }
-        });
-        zebricekMapa[uid].nejviceBoduVKoleLive = maxPtsLive;
-        zebricekMapa[uid].nejviceBoduVKoleNazevLive = maxKoloLive;
     });
 
     const perfektniKolaSeznam = [];
@@ -1769,6 +1745,30 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             });
         });
     }
+
+    Object.keys(zebricekMapa).forEach(uid => {
+        let maxPts = 0;
+        let maxKolo = '–';
+        Object.entries(zebricekMapa[uid].bodyPoKolech).forEach(([klicKola, pts]) => {
+            if (pts > maxPts) {
+                maxPts = pts;
+                maxKolo = klicKola;
+            }
+        });
+        zebricekMapa[uid].nejviceBoduVKole = maxPts;
+        zebricekMapa[uid].nejviceBoduVKoleNazev = maxKolo;
+
+        let maxPtsLive = 0;
+        let maxKoloLive = '–';
+        Object.entries(zebricekMapa[uid].bodyPoKolechLive || {}).forEach(([klicKola, pts]) => {
+            if (pts > maxPtsLive) {
+                maxPtsLive = pts;
+                maxKoloLive = klicKola;
+            }
+        });
+        zebricekMapa[uid].nejviceBoduVKoleLive = maxPtsLive;
+        zebricekMapa[uid].nejviceBoduVKoleNazevLive = maxKoloLive;
+    });
 
     const vyhraVKolePocet = {};
     const vyhranaKolaSeznam = {};
