@@ -531,7 +531,18 @@ const slovnikTymu = {
     "FK Crvena Zvezda": "Crvena Zvezda", "Red Star Belgrade": "Crvena Zvezda",
     "ŠK Slovan Bratislava": "Slovan Bratislava", "Slovan Bratislava": "Slovan Bratislava",
     "BSC Young Boys": "Young Boys", "Young Boys": "Young Boys",
-    "FC Shakhtar Donetsk": "Šachtar", "Shakhtar Donetsk": "Šachtar"
+    "FC Shakhtar Donetsk": "Šachtar", "Shakhtar Donetsk": "Šachtar",
+    // 🔍 OVĚŘENÉ DVOJICE ZE SOFASCORE API PRO LIGU MISTRŮ
+    "FC Porto": "Porto", "Porto": "Porto",
+    "Viking FK": "Viking", "Viking": "Viking",
+    "SSC Napoli": "Napoli", "Napoli": "Napoli",
+    "AS Roma": "Roma", "Roma": "Roma",
+    "Sabah FK": "Sabah Baku", "Sabah": "Sabah Baku",
+    "RC Lens": "Lens", "Lens": "Lens",
+    "Olympique Lyonnais": "Lyon", "Lyon": "Lyon",
+    "Royale Union Saint-Gilloise": "Union SG",
+    "Olympiacos FC": "Olympiacos",
+    "Bodø/Glimt": "Bodø/Glimt", "FK Bodø/Glimt": "Bodø/Glimt"
 };
 
 const PL_NORM = (str) => String(str || '').toLowerCase().trim();
