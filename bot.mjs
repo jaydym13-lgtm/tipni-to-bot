@@ -645,34 +645,26 @@ const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, ti
     return ziskaneBody;
 };
 
-// --- 📤 DISTRIBUČNÍ SYSTÉM (PROMISE MUTEX LOCK PRO R2 UPLOAD) ---
-const r2UploadLocks = new Map();
-
+// --- 📤 DISTRIBUČNÍ SYSTÉM PRO R2 UPLOAD ---
 async function uploadToR2(leagueName, filename, jsonData) {
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const dynamicPath = `sezony/${SEZONA_ID}/${ligaKlic}/${filename}`;
+    const bodyText = JSON.stringify(jsonData, null, 2);
 
-    const previousLock = r2UploadLocks.get(dynamicPath) || Promise.resolve();
-    
-    const currentUpload = (async () => {
-        await previousLock;
+    for (let pokus = 1; pokus <= 2; pokus++) {
         try {
-            const bodyText = JSON.stringify(jsonData, null, 2);
             await r2Client.send(new PutObjectCommand({
                 Bucket: BUCKET_NAME,
                 Key: dynamicPath,
                 Body: bodyText,
                 ContentType: "application/json"
             }));
+            return;
         } catch (err) {
-            console.error(`❌ Chyba distribuce souboru ${filename} (${leagueName}) do R2:`, err);
+            if (pokus === 2) {
+                console.error(`❌ Chyba distribuce souboru ${filename} (${leagueName}) do R2:`, err.message || err);
+            }
         }
-    })();
-
-    r2UploadLocks.set(dynamicPath, currentUpload.catch(() => {}));
-    await currentUpload;
-    if (r2UploadLocks.get(dynamicPath) === currentUpload) {
-        r2UploadLocks.delete(dynamicPath);
     }
 }
 
@@ -2109,9 +2101,17 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         const formaDomaci = spoctiSezonniFormuTymu(dTrans, z.datum, centralMatches);
         const formaHoste = spoctiSezonniFormuTymu(hTrans, z.datum, centralMatches);
 
+        // 🎯 KONTROLA: Byl den tohoto zápasu reálně poslán ke stažení do RapidAPI?
+        const isHockey = leagueName.includes("hokej") || leagueName.includes("Extraliga");
+        const sportKlic = isHockey ? "ice-hockey" : "football";
+        const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
+        const dayKey = datumIso ? `${sportKlic}_${datumIso}` : null;
+        const bylDenZpracovan = Boolean(dayKey && RAM_PROCESSED_ODDS_DAYS.has(dayKey));
+
         zapasyMapaObohacena[mId] = {
             ...z,
             odds: matchOdds,
+            oddsChecked: bylDenZpracovan,
             forma: {
                 domaci: formaDomaci,
                 hoste: formaHoste
@@ -2167,7 +2167,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     }
 
     if (forceWriteHistory) {
-        const uploadPromises = [];
+        const uploadTasks = [];
 
         for (const uid of Object.keys(RAM_USERS_PROFILES)) {
             const uSouteze = RAM_USERS_TIPS[uid] || {};
@@ -2183,7 +2183,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             });
 
             const historieJson = { mapaTipu: hracovyTipyOdemcene, vytvoreno: timestampNow };
-            uploadPromises.push(uploadToR2(leagueName, `historie_hrace_${uid}.json`, historieJson));
+            uploadTasks.push(() => uploadToR2(leagueName, `historie_hrace_${uid}.json`, historieJson));
         }
 
         Object.keys(centralMatches).forEach(mId => {
@@ -2215,16 +2215,19 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                 });
 
                 const spyJson = { tipy: tipyProZapasPole, aktualizovano: timestampNow };
-                uploadPromises.push(uploadToR2(leagueName, `spy_zapas_${mId}.json`, spyJson));
-                
-                if (!jeLive && zapas.apiStatus === "FINISHED") {
-                    zapas.spyR2Synced = true;
-                }
+                uploadTasks.push(async () => {
+                    await uploadToR2(leagueName, `spy_zapas_${mId}.json`, spyJson);
+                    if (!jeLive && zapas.apiStatus === "FINISHED") {
+                        zapas.spyR2Synced = true;
+                    }
+                });
             }
         });
 
-        if (uploadPromises.length > 0) {
-            await Promise.all(uploadPromises);
+        // 🚀 DÁVKOVÝ ZÁPIS PO 5 BEZ SÍŤOVÉHO ZAHLACENÍ A BEZ SETTIMEOUT
+        const CHUNK_SIZE = 5;
+        for (let i = 0; i < uploadTasks.length; i += CHUNK_SIZE) {
+            await Promise.all(uploadTasks.slice(i, i + CHUNK_SIZE).map(fn => fn()));
         }
     }
 
