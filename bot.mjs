@@ -102,6 +102,34 @@ const RAM_EVENT_MAP = {};
 const EVENT_MAP_R2_KEY = `sezony/${SEZONA_ID}/event_map.json`;
 const ODDS_R2_KEY = `sezony/${SEZONA_ID}/central_odds.json`;
 
+const PROCESSED_DAYS_R2_KEY = `sezony/${SEZONA_ID}/processed_odds_days.json`;
+const RAM_PROCESSED_ODDS_DAYS = new Set();
+
+async function nactiProcessedDaysZR2() {
+    try {
+        const res = await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: PROCESSED_DAYS_R2_KEY }));
+        const str = await res.Body.transformToString();
+        const arr = JSON.parse(str);
+        if (Array.isArray(arr)) {
+            arr.forEach(d => RAM_PROCESSED_ODDS_DAYS.add(d));
+            console.log(`🛡️ R2 TREZOR: Načteno ${RAM_PROCESSED_ODDS_DAYS.size} již odbavených dní kurzů.`);
+        }
+    } catch (e) {}
+}
+
+async function ulozProcessedDaysDoR2() {
+    try {
+        await r2Client.send(new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: PROCESSED_DAYS_R2_KEY,
+            Body: JSON.stringify(Array.from(RAM_PROCESSED_ODDS_DAYS)),
+            ContentType: "application/json"
+        }));
+    } catch (e) {
+        console.error("❌ R2 TREZOR: Selhalo uložení odbavených dní kurzů:", e.message);
+    }
+}
+
 // Číselník turnajů na SofaScore s přesnými ID turnajů a sezón
 const SOFASCORE_TOURNAMENTS = {
     "Chance Liga": { id: 49, seasonId: 96966, sport: "football", isUnique: false },
@@ -389,10 +417,13 @@ async function smartSyncKurzu() {
                 const matchDate = new Date(matchMs);
                 const datumIso = matchDate.toISOString().split("T")[0];
                 const matchKey = `${PL_NORM(z.domaci)} vs ${PL_NORM(z.hoste)}`;
-                const uzMaKurz = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || RAM_CENTRAL_ODDS[leagueName]?.[z.id];
+                const uzMaKurz = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || RAM_CENTRAL_ODDS[leagueName]?.[z.id] || z.odds;
 
                 if (!uzMaKurz) {
-                    dnyKeStazeni[sportKlic].add(datumIso);
+                    const dayKey = `${sportKlic}_${datumIso}`;
+                    if (!RAM_PROCESSED_ODDS_DAYS.has(dayKey)) {
+                        dnyKeStazeni[sportKlic].add(datumIso);
+                    }
                 }
             }
         });
@@ -402,7 +433,7 @@ async function smartSyncKurzu() {
     const pocetHokejDnu = dnyKeStazeni["ice-hockey"].size;
 
     if (pocetFotbalDnu === 0 && pocetHokejDnu === 0) {
-        console.log(`🛡️ SMART SYNC: Nadcházející zápasy do ${datumKonecStr} mají kompletní kurzy. Přeskakuji API (0 requestů).`);
+        console.log(`🛡️ SMART SYNC: Všechny dny do ${datumKonecStr} mají kurzy nebo již byly z API staženy. Přeskakuji API (0 requestů).`);
         return;
     }
 
@@ -411,10 +442,14 @@ async function smartSyncKurzu() {
     let celkemNaparovano = 0;
     for (const datum of dnyKeStazeni.football) {
         celkemNaparovano += await stahniDenniKurzyRapidApi("football", datum);
+        RAM_PROCESSED_ODDS_DAYS.add(`football_${datum}`);
     }
     for (const datum of dnyKeStazeni["ice-hockey"]) {
         celkemNaparovano += await stahniDenniKurzyRapidApi("ice-hockey", datum);
+        RAM_PROCESSED_ODDS_DAYS.add(`ice-hockey_${datum}`);
     }
+
+    await ulozProcessedDaysDoR2();
 
     if (celkemNaparovano > 0) {
         await ulozKurzyDoR2();
@@ -736,6 +771,7 @@ async function hydratujDataZFirestore() {
                         vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : undefined,
                         apiStatus: data.apiStatus || "SCHEDULED",
                         postup: data.postup || "",
+                        odds: data.odds || undefined,
                         spyUploaded: jeHotovoNeboPoVykovu,
                         spyR2Synced: jeHotovoNeboPoVykovu
                     };
@@ -768,9 +804,10 @@ async function hydratujDataZFirestore() {
                     vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : undefined,
                     apiStatus: data.apiStatus || "SCHEDULED",
                     postup: data.postup || "",
-                    spyUploaded: jeHotovoNeboPoVykovu,
-                    spyR2Synced: jeHotovoNeboPoVykovu
-                };
+                    odds: data.odds || undefined,
+                        spyUploaded: jeHotovoNeboPoVykovu,
+                        spyR2Synced: jeHotovoNeboPoVykovu
+                    };
             });
         }
     }
@@ -863,10 +900,12 @@ function zapniReaktivniSluchatka() {
                         stary.vysledek_hoste === (data.vysledek_hoste !== undefined ? data.vysledek_hoste : stary.vysledek_hoste) &&
                         stary.apiStatus === (data.apiStatus || stary.apiStatus || "SCHEDULED") &&
                         stary.postup === (data.postup || stary.postup || "")
+                    && JSON.stringify(stary.odds || null) === JSON.stringify(data.odds || null)
                     );
 
                     if (!jeShodne) {
                         realnaZmena = true;
+                        const finalOdds = data.odds || stary.odds || undefined;
                         RAM_CENTRAL_MATCHES[leagueName][matchId] = {
                             domaci: data.domaci || stary.domaci || "Neznámý",
                             hoste: data.hoste || stary.hoste || "Neznámý",
@@ -878,9 +917,14 @@ function zapniReaktivniSluchatka() {
                             vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : stary.vysledek_hoste,
                             apiStatus: data.apiStatus || stary.apiStatus || "SCHEDULED",
                             postup: data.postup || stary.postup || "",
+                            odds: finalOdds,
                             spyUploaded: stary.spyUploaded || false,
                             spyR2Synced: stary.spyR2Synced || false
                         };
+                        if (finalOdds) {
+                            if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
+                            RAM_CENTRAL_ODDS[leagueName][matchId] = finalOdds;
+                        }
                     }
                 }
             });
@@ -2061,7 +2105,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         const dTrans = z.domaci;
         const hTrans = z.hoste;
         const matchKey = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
-        const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || RAM_CENTRAL_ODDS[leagueName]?.[mId] || null;
+         const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || RAM_CENTRAL_ODDS[leagueName]?.[mId] || z.odds || null;
         const formaDomaci = spoctiSezonniFormuTymu(dTrans, z.datum, centralMatches);
         const formaHoste = spoctiSezonniFormuTymu(hTrans, z.datum, centralMatches);
 
@@ -2744,6 +2788,7 @@ async function startEnterpriseApplication() {
         await synchronizujSofaScoreEventMap();
     }
     await nactiKurzyZR2();
+    await nactiProcessedDaysZR2();
 
     // 2. Teprve s plnou kurzovou pamětí provedeme startovní hydrataci a generování rozpisů
     await hydratujDataZFirestore();
