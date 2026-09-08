@@ -2447,7 +2447,7 @@ async function providniApiHeartbeat() {
         if (celkovyObsahujeAktivniZapas) {
             console.log(`[${nyni.toLocaleTimeString('cs-CZ')}] 🚀 STATUS: Zápasy aktivně běží.`);
         }
-
+        await aktualizujLiveRadarR2();
     } catch (err) {
         console.error(`❌ Kritická chyba v Heartbeat:`, err);
     } finally {
