@@ -24,7 +24,7 @@ const LIGY_API_MAPA = {
 };
 
 // Seznam lig, které má bot v tomto běhu živě obsluhovat
-const SEZNAM_LIG = (process.env.ACTIVE_LEAGUES || "Chance Liga,Premier League,MS ve fotbale,Tipsport Extraliga,MS v hokeji")
+const SEZNAM_LIG = (process.env.ACTIVE_LEAGUES || "Chance Liga,Premier League,Liga mistrů,MS ve fotbale,Tipsport Extraliga,MS v hokeji")
     .split(",")
     .map(l => l.trim())
     .filter(Boolean);
