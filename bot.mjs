@@ -929,11 +929,39 @@ function zapniReaktivniSluchatka() {
     });
 }
 
+// --- 📡 GLOBÁLNÍ LIVE RADAR PRO MENU A KATALOG (0 FIRESTORE READS) ---
+let RAM_LAST_LIVE_RADAR_STR = "";
+
+async function aktualizujLiveRadarR2() {
+    const radarData = {};
+    SEZNAM_LIG.forEach(lName => {
+        const zapasy = Object.values(RAM_CENTRAL_MATCHES[lName] || {});
+        radarData[lName] = zapasy.some(z => z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED");
+    });
+
+    const str = JSON.stringify(radarData);
+    if (str !== RAM_LAST_LIVE_RADAR_STR) {
+        RAM_LAST_LIVE_RADAR_STR = str;
+        try {
+            await r2Client.send(new PutObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: `sezony/${SEZONA_ID}/live_radar.json`,
+                Body: str,
+                ContentType: "application/json",
+                CacheControl: "public, max-age=5, must-revalidate"
+            }));
+        } catch (e) {
+            console.error("❌ Selhalo uložení live_radar.json do R2:", e.message);
+        }
+    }
+}
+
 // --- 🧮 AGREGÁTOR PAMĚTI ---
 async function rekonstruujAgregatyVsechny(forceWriteHistory = false) {
     for (const leagueName of SEZNAM_LIG) {
         await rekonstruujAgregatyProLigu(leagueName, forceWriteHistory);
     }
+    await aktualizujLiveRadarR2();
 }
 
 // =========================================================================
