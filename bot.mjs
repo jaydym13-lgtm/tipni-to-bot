@@ -2092,6 +2092,88 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const timestampNow = new Date().toISOString();
     const radarStats = spoctiRadarStatistikyBot(centralMatches, RAM_USERS_PROFILES, RAM_USERS_TIPS, leagueName);
 
+    // 👑 BLESKOVÝ SOUHRN KOL PRO BANNER (HRÁČ KOLA & TOP ZÁPAS)
+    const kolaSouhrn = {};
+    Object.keys(kolaZapasyMap).forEach(klicKola => {
+        const zapasyVKole = kolaZapasyMap[klicKola] || [];
+        const isLiveOrStartedRound = zapasyVKole.some(z => z.vysledek_domaci !== undefined || z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED" || (z.datum && new Date(z.datum) <= new Date()));
+
+        let maxPtsRound = -Infinity;
+        Object.keys(zebricekMapa).forEach(uid => {
+            const pts = zebricekMapa[uid].bodyPoKolechLive?.[klicKola] !== undefined
+                ? zebricekMapa[uid].bodyPoKolechLive[klicKola]
+                : (zebricekMapa[uid].bodyPoKolech?.[klicKola] || 0);
+            if (pts > maxPtsRound) maxPtsRound = pts;
+        });
+
+        let hraciKolaObj = null;
+        if (isLiveOrStartedRound && maxPtsRound > 0) {
+            const winners = [];
+            Object.keys(zebricekMapa).forEach(uid => {
+                const pts = zebricekMapa[uid].bodyPoKolechLive?.[klicKola] !== undefined
+                    ? zebricekMapa[uid].bodyPoKolechLive[klicKola]
+                    : (zebricekMapa[uid].bodyPoKolech?.[klicKola] || 0);
+                if (pts === maxPtsRound) {
+                    winners.push(zebricekMapa[uid].nickname);
+                }
+            });
+            hraciKolaObj = {
+                names: winners.join(', '),
+                points: maxPtsRound,
+                count: winners.length
+            };
+        }
+
+        let topMatchObj = null;
+        if (pravidlaLigi.hasTopMatch) {
+            const topMatch = zapasyVKole.find(z => z.isTopMatch);
+            if (topMatch) {
+                const isTopStarted = (topMatch.vysledek_domaci !== undefined && topMatch.vysledek_domaci !== null) ||
+                                     topMatch.apiStatus === "IN_PLAY" || topMatch.apiStatus === "PAUSED" ||
+                                     (topMatch.datum && new Date(topMatch.datum) <= new Date());
+                
+                const exactUsers = [];
+                if (isTopStarted && topMatch.vysledek_domaci !== undefined && topMatch.vysledek_domaci !== null) {
+                    const rD = parseInt(topMatch.vysledek_domaci);
+                    const rH = parseInt(topMatch.vysledek_hoste);
+
+                    Object.keys(RAM_USERS_PROFILES).forEach(uid => {
+                        const p = RAM_USERS_PROFILES[uid];
+                        if (!p.leagues || !p.leagues.includes(leagueName)) return;
+
+                        const uSouteze = RAM_USERS_TIPS[uid] || {};
+                        const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
+                        const uTip = uTips[topMatch.id];
+
+                        if (uTip && uTip.tip_domaci !== undefined && uTip.tip_domaci !== null && String(uTip.tip_domaci).trim() !== '') {
+                            const tD = parseInt(uTip.tip_domaci);
+                            const tH = parseInt(uTip.tip_hoste);
+                            const isExact = (tD === rD && tH === rH && (!topMatch.isPlayoff || rD !== rH || uTip.postup === topMatch.postup));
+                            if (isExact) {
+                                exactUsers.push(p.nickname);
+                            }
+                        }
+                    });
+                }
+
+                topMatchObj = {
+                    hasTopMatch: true,
+                    isStarted: isTopStarted,
+                    isEvaluated: topMatch.vysledek_domaci !== undefined && topMatch.vysledek_domaci !== null,
+                    domaci: topMatch.domaci,
+                    hoste: topMatch.hoste,
+                    exactCount: exactUsers.length,
+                    exactUsers: exactUsers
+                };
+            }
+        }
+
+        kolaSouhrn[klicKola] = {
+            hracKola: hraciKolaObj,
+            topMatch: topMatchObj
+        };
+    });
+
     const leaderboardJson = {
         zebricek: zebricekPole, 
         zebricekLive: zebricekLivePole, 
@@ -2112,6 +2194,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         otevrenaKolaStatistikyLive: otevrenaKolaStatistikyLive,
         otevrenaKolaSeznam: otevrenaKolaArr,
         aktivniKoloText: aktivniKolo,
+        kolaSouhrn: kolaSouhrn,
         radar: radarStats,
         aktualizovano: timestampNow
     };
