@@ -2092,7 +2092,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const timestampNow = new Date().toISOString();
     const radarStats = spoctiRadarStatistikyBot(centralMatches, RAM_USERS_PROFILES, RAM_USERS_TIPS, leagueName);
 
-    // 👑 BLESKOVÝ SOUHRN KOL PRO BANNER (HRÁČ KOLA & TOP ZÁPAS)
+    // 👑 BLESKOVÝ SOUHRN KOL PRO BANNER (HRÁČ KOLA, TOP ZÁPAS & NEJVÍC PŘESNÝCH)
     const kolaSouhrn = {};
     Object.keys(kolaZapasyMap).forEach(klicKola => {
         const zapasyVKole = kolaZapasyMap[klicKola] || [];
@@ -2122,6 +2122,54 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                 points: maxPtsRound,
                 count: winners.length
             };
+        }
+
+        // 🎯 VÝPOČET NEJVĚTŠÍHO POČTU PŘESNÝCH VÝSLEDKŮ V KOLE (PRO LIGU MISTRŮ)
+        let nejvicPresnychObj = null;
+        if (isLiveOrStartedRound) {
+            const exactCounts = {};
+            let maxExactRound = 0;
+
+            Object.keys(RAM_USERS_PROFILES).forEach(uid => {
+                const p = RAM_USERS_PROFILES[uid];
+                if (!p.leagues || !p.leagues.includes(leagueName)) return;
+
+                const uSouteze = RAM_USERS_TIPS[uid] || {};
+                const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
+                let userExact = 0;
+
+                zapasyVKole.forEach(zap => {
+                    const vDom = zap.vysledek_domaci;
+                    const vHos = zap.vysledek_hoste;
+                    if (vDom !== undefined && vDom !== null && vHos !== undefined && vHos !== null) {
+                        const uTip = uTips[zap.id];
+                        if (uTip && uTip.tip_domaci !== undefined && uTip.tip_domaci !== null && String(uTip.tip_domaci).trim() !== '') {
+                            const tD = parseInt(uTip.tip_domaci);
+                            const tH = parseInt(uTip.tip_hoste);
+                            const rD = parseInt(vDom);
+                            const rH = parseInt(vHos);
+                            const isExact = (tD === rD && tH === rH && (!zap.isPlayoff || rD !== rH || uTip.postup === zap.postup));
+                            if (isExact) userExact++;
+                        }
+                    }
+                });
+
+                exactCounts[uid] = userExact;
+                if (userExact > maxExactRound) maxExactRound = userExact;
+            });
+
+            if (maxExactRound > 0) {
+                const exactWinners = [];
+                Object.keys(exactCounts).forEach(uid => {
+                    if (exactCounts[uid] === maxExactRound) {
+                        exactWinners.push(RAM_USERS_PROFILES[uid]?.nickname || zebricekMapa[uid]?.nickname || 'Hráč');
+                    }
+                });
+                nejvicPresnychObj = {
+                    names: exactWinners.join(', '),
+                    count: maxExactRound
+                };
+            }
         }
 
         let topMatchObj = null;
@@ -2170,7 +2218,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
 
         kolaSouhrn[klicKola] = {
             hracKola: hraciKolaObj,
-            topMatch: topMatchObj
+            topMatch: topMatchObj,
+            nejvicPresnych: nejvicPresnychObj
         };
     });
 
