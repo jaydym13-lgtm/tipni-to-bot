@@ -354,10 +354,7 @@ async function ulozKurzyDoR2() {
     }
 }
 
-// 🧠 SMART SYNC PLÁNOVAČ: 3FÁZOVÝ TÝDENNÍ CYKLUS BEZ MRTVÝCH OKEN
-// Úterý 17:00 -> Víkend (Pá–Po)
-// Sobota 04:00 -> Všední dny (Út–Čt, předstih LM)
-// Pondělí 04:00 -> Všední dny (Út–Čt, dočištění dohrávek)
+// ⚽ SMART SYNC PLÁNOVAČ: POUZE PRO FOTBAL (Nedotčeno pro Premier League a Chance Ligu)
 async function smartSyncKurzu() {
     const nyni = new Date();
     const denVTydnu = nyni.getDay(); // 0 = neděle, 1 = pondělí, 2 = úterý, 3 = středa, 4 = čtvrtek, 5 = pátek, 6 = sobota
@@ -365,9 +362,6 @@ async function smartSyncKurzu() {
     let startBloku = new Date(nyni);
     let konecBloku = new Date(nyni);
 
-    // 🎯 ROZLIŠENÍ BLOKŮ:
-    // So (6), Ne (0), Po (1) -> Cíl: Všední dny (Úterý 00:00 až Čtvrtek 23:59)
-    // Út (2), St (3), Čt (4), Pá (5) -> Cíl: Víkendový blok (Pátek 00:00 až Pondělí 23:59)
     if (denVTydnu === 6 || denVTydnu === 0 || denVTydnu === 1) {
         const dnyDoUtery = (denVTydnu === 6 ? 3 : (denVTydnu === 0 ? 2 : 1));
         const dnyDoCtvrtka = dnyDoUtery + 2;
@@ -398,21 +392,20 @@ async function smartSyncKurzu() {
     const datumStartStr = startBloku.toISOString().split("T")[0];
     const datumKonecStr = konecBloku.toISOString().split("T")[0];
 
-    console.log(`📅 SMART SYNC: Kontroluji herní blok (${datumStartStr} až ${datumKonecStr})...`);
+    console.log(`⚽ FOTBAL SYNC: Kontroluji fotbalový blok (${datumStartStr} až ${datumKonecStr})...`);
 
-    const dnyKeStazeni = { football: new Set(), "ice-hockey": new Set() };
+    const dnyKeStazeni = { football: new Set() };
 
     SEZNAM_LIG.forEach(leagueName => {
+        if (leagueName.includes("hokej") || leagueName.includes("Extraliga")) return; // Hokej má vlastní sync
         const zapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
-        const isHockey = leagueName.includes("hokej") || leagueName.includes("Extraliga");
-        const sportKlic = isHockey ? "ice-hockey" : "football";
+        const sportKlic = "football";
 
         Object.values(zapasy).forEach(z => {
             if (!z.datum) return;
             const matchMs = Date.parse(z.datum);
             if (isNaN(matchMs)) return;
 
-            // Kontrolujeme pouze zápasy OD TEĎ do konce týdenního bloku
             if (matchMs >= minTargetMs && matchMs <= maxTargetMs) {
                 const matchDate = new Date(matchMs);
                 const datumIso = matchDate.toISOString().split("T")[0];
@@ -430,21 +423,110 @@ async function smartSyncKurzu() {
     });
 
     const pocetFotbalDnu = dnyKeStazeni.football.size;
-    const pocetHokejDnu = dnyKeStazeni["ice-hockey"].size;
 
-    if (pocetFotbalDnu === 0 && pocetHokejDnu === 0) {
-        console.log(`🛡️ SMART SYNC: Všechny dny do ${datumKonecStr} mají kurzy nebo již byly z API staženy. Přeskakuji API (0 requestů).`);
+    if (pocetFotbalDnu === 0) {
+        console.log(`🛡️ FOTBAL SYNC: Všechny fotbalové dny do ${datumKonecStr} mají kurzy nebo již byly z API staženy. Přeskakuji API (0 requestů).`);
         return;
     }
 
-    console.log(`🚀 SMART SYNC: Stahuji chybějící kurzy pro ${pocetFotbalDnu} fotbalových a ${pocetHokejDnu} hokejových dnů.`);
+    console.log(`🚀 FOTBAL SYNC: Stahuji chybějící kurzy pro ${pocetFotbalDnu} fotbalových dnů.`);
 
     let celkemNaparovano = 0;
     for (const datum of dnyKeStazeni.football) {
         celkemNaparovano += await stahniDenniKurzyRapidApi("football", datum);
         RAM_PROCESSED_ODDS_DAYS.add(`football_${datum}`);
     }
-    for (const datum of dnyKeStazeni["ice-hockey"]) {
+
+    await ulozProcessedDaysDoR2();
+
+    if (celkemNaparovano > 0) {
+        await ulozKurzyDoR2();
+    }
+
+    await planujRekonstrukciAgregatu();
+}
+
+// 🏒 HOKEJ SMART SYNC: PŘÍSNÁ 3-FÁZOVÁ KONTROLA VÝHRADNĚ PRO TIPSPORT EXTRALIGU
+async function smartSyncKurzuHokej() {
+    const nyni = new Date();
+    const den = nyni.getDay(); // 0=Ne, 1=Po, 2=Út, 3=St, 4=Čt, 5=Pá, 6=So
+    const hod = nyni.getHours();
+
+    let startBloku = new Date(nyni);
+    let konecBloku = new Date(nyni);
+
+    // 1. Blok: Sobota 12:00 -> Pondělí 15:00 (pokrývá Ne a Po do 15:00)
+    if ((den === 6 && hod >= 12) || den === 0 || (den === 1 && hod < 15)) {
+        const dnyOdSoboty = (den === 6) ? 0 : (den === 0 ? 1 : 2);
+        startBloku.setDate(nyni.getDate() - dnyOdSoboty);
+        startBloku.setHours(12, 0, 0, 0);
+
+        const dnyDoPondeli = (den === 6) ? 2 : (den === 0 ? 1 : 0);
+        konecBloku.setDate(nyni.getDate() + dnyDoPondeli);
+        konecBloku.setHours(15, 0, 0, 0);
+    }
+    // 2. Blok: Pondělí 15:00 -> Středa 15:00 (pokrývá Út a St do 15:00)
+    else if ((den === 1 && hod >= 15) || den === 2 || (den === 3 && hod < 15)) {
+        const dnyOdPondeli = (den === 1) ? 0 : (den === 2 ? 1 : 2);
+        startBloku.setDate(nyni.getDate() - dnyOdPondeli);
+        startBloku.setHours(15, 0, 0, 0);
+
+        const dnyDoStredy = (den === 1) ? 2 : (den === 2 ? 1 : 0);
+        konecBloku.setDate(nyni.getDate() + dnyDoStredy);
+        konecBloku.setHours(15, 0, 0, 0);
+    }
+    // 3. Blok: Středa 15:00 -> Sobota 12:00 (pokrývá Čt, Pá a So do 12:00)
+    else {
+        const dnyOdStredy = (den === 3) ? 0 : (den === 4 ? 1 : (den === 5 ? 2 : 3));
+        startBloku.setDate(nyni.getDate() - dnyOdStredy);
+        startBloku.setHours(15, 0, 0, 0);
+
+        const dnyDoSoboty = (den === 3) ? 3 : (den === 4 ? 2 : (den === 5 ? 1 : 0));
+        konecBloku.setDate(nyni.getDate() + dnyDoSoboty);
+        konecBloku.setHours(12, 0, 0, 0);
+    }
+
+    const minTargetMs = startBloku.getTime();
+    const maxTargetMs = konecBloku.getTime();
+
+    const datumStartStr = startBloku.toISOString();
+    const datumKonecStr = konecBloku.toISOString();
+
+    console.log(`🏒 HOKEJ SYNC: Kontroluji mantinel (${datumStartStr} až ${datumKonecStr})...`);
+
+    const dnyKeStazeni = new Set();
+    const zapasy = RAM_CENTRAL_MATCHES["Tipsport Extraliga"] || {};
+
+    Object.values(zapasy).forEach(z => {
+        if (!z.datum) return;
+        const matchMs = Date.parse(z.datum);
+        if (isNaN(matchMs)) return;
+
+        // Kontrola, zda zápas spadá přesně do daného okna
+        if (matchMs >= minTargetMs && matchMs <= maxTargetMs) {
+            const matchDate = new Date(matchMs);
+            const datumIso = matchDate.toISOString().split("T")[0];
+            const matchKey = `${PL_NORM(z.domaci)} vs ${PL_NORM(z.hoste)}`;
+            const uzMaKurz = RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[matchKey] || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[z.id] || z.odds;
+
+            if (!uzMaKurz) {
+                const dayKey = `ice-hockey_${datumIso}`;
+                if (!RAM_PROCESSED_ODDS_DAYS.has(dayKey)) {
+                    dnyKeStazeni.add(datumIso);
+                }
+            }
+        }
+    });
+
+    if (dnyKeStazeni.size === 0) {
+        console.log(`🛡️ HOKEJ SYNC: Žádné chybějící dny kurzů pro Extraligu v daném okně. Přeskakuji API (0 requestů).`);
+        return;
+    }
+
+    console.log(`🚀 HOKEJ SYNC: Stahuji kurzy pro ${dnyKeStazeni.size} hokejových dnů.`);
+
+    let celkemNaparovano = 0;
+    for (const datum of dnyKeStazeni) {
         celkemNaparovano += await stahniDenniKurzyRapidApi("ice-hockey", datum);
         RAM_PROCESSED_ODDS_DAYS.add(`ice-hockey_${datum}`);
     }
@@ -2923,10 +3005,18 @@ async function startEnterpriseApplication() {
         }
 
         if (url === "/sync-odds" || url.startsWith("/sync-odds")) {
-            console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím Smart Sync kurzů...`);
-            smartSyncKurzu(true).catch(err => console.error("❌ Chyba synchronizace kurzů:", err));
+            console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím Smart Sync fotbalových kurzů...`);
+            smartSyncKurzu().catch(err => console.error("❌ Chyba synchronizace fotbalových kurzů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Smart Sync kurzů spuštěn.");
+            res.end("OK - Smart Sync fotbalových kurzů spuštěn.");
+            return;
+        }
+
+        if (url === "/sync-odds-hockey" || url.startsWith("/sync-odds-hockey")) {
+            console.log(`🏒 SERVISNÍ PING (/sync-odds-hockey): Spouštím Smart Sync hokejových kurzů...`);
+            smartSyncKurzuHokej().catch(err => console.error("❌ Chyba synchronizace hokejových kurzů:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Smart Sync hokejových kurzů spuštěn.");
             return;
         }
 
