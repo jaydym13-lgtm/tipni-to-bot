@@ -2316,7 +2316,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     });
 
     // 🃏 FUT-STYLE HRÁČSKÉ KARTY: MATEMATICKÝ VÝPOČET ATRIBUTŮ (1–99) A ARCHETYPŮ V RAM
-    const odehraneZapasyChronoBot = Object.values(centralMatches)
+    const odehraneZapasyChronoBot = Object.entries(centralMatches)
+        .map(([id, z]) => ({ ...z, id, matchId: id }))
         .filter(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED")
         .sort((a, b) => (Date.parse(a.datum) || 0) - (Date.parse(b.datum) || 0));
 
@@ -2331,10 +2332,12 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         const topExact = isLiveMode ? (stats.presneTopMatchesCountLive || 0) : (stats.presneTopMatchesCount || 0);
         const vyhranaKola = isLiveMode ? (vyhraVKolePocetLive[stats.nickname] || 0) : (vyhraVKolePocet[stats.nickname] || 0);
         const bodyKola = isLiveMode ? (stats.bodyPoKolechLive || {}) : (stats.bodyPoKolech || {});
+        const maxRound = isLiveMode ? (stats.nejviceBoduVKoleLive || stats.nejviceBoduVKole || 0) : (stats.nejviceBoduVKole || 0);
 
-        // Výpočet bodové šňůry bez nuly (Streak)
+        // Výpočet bodové šňůry bez nuly (Streak) a trefených remíz
         let curStreak = 0;
         let maxStreak = 0;
+        let trefeneRemizy = 0;
         odehraneZapasyChronoBot.forEach(z => {
             const uTip = uTips[z.id || z.matchId];
             if (!uTip || uTip.tip_domaci === undefined || uTip.tip_domaci === null || String(uTip.tip_domaci).trim() === '') {
@@ -2349,6 +2352,11 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                 curStreak = 0;
                 return;
             }
+
+            if (tD === tH && rD === rH) {
+                trefeneRemizy++;
+            }
+
             const b = vypocitejBodyZapasuLocal(tD, tH, rD, rH, uTip.postup, z.postup, z.isPlayoff, z.isTopMatch, leagueName);
             if (b > 0) {
                 curStreak++;
@@ -2497,6 +2505,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             badges: {
                 streaks: maxStreak,
                 exacts: presne,
+                draws: trefeneRemizy,
+                maxRound: maxRound,
                 roundWins: vyhranaKola,
                 perfektniKola: (perfektniKolaSeznam.filter(pk => pk.uid === uid) || []).length
             },
