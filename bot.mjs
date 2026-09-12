@@ -3109,57 +3109,87 @@ async function synchronizujGrafikuLig() {
             const data = res.ok ? await res.json() : null;
             const leagueObj = data?.leagues?.[0];
 
-            // 1. Uložení trofeje
+            // 1. Uložení trofeje s ochranou proti přepsání
             const trophyUrl = leagueObj?.strTrophy;
             if (trophyUrl) {
                 const r2TrophyKey = `leagues/trophies/${cfg.slug}.png`;
-                const imgRes = await fetch(trophyUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
-                if (imgRes.ok) {
-                    const buf = await imgRes.arrayBuffer();
-                    await r2Client.send(new PutObjectCommand({
-                        Bucket: BUCKET_NAME,
-                        Key: r2TrophyKey,
-                        Body: Buffer.from(buf),
-                        ContentType: "image/png",
-                        CacheControl: "public, max-age=31536000, immutable"
-                    }));
-                    console.log(`✅ TROFEJ: ${leagueName} -> ${r2TrophyKey}`);
+                let exists = false;
+                try {
+                    await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: r2TrophyKey }));
+                    exists = true;
+                } catch (e) {}
+
+                if (!exists) {
+                    const imgRes = await fetch(trophyUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
+                    if (imgRes.ok) {
+                        const buf = await imgRes.arrayBuffer();
+                        await r2Client.send(new PutObjectCommand({
+                            Bucket: BUCKET_NAME,
+                            Key: r2TrophyKey,
+                            Body: Buffer.from(buf),
+                            ContentType: "image/png",
+                            CacheControl: "public, max-age=31536000, immutable"
+                        }));
+                        console.log(`✅ TROFEJ: ${leagueName} -> ${r2TrophyKey}`);
+                    }
+                } else {
+                    console.log(`🛡️ TROFEJ: ${leagueName} už na R2 existuje, nepřepisuji.`);
                 }
             }
 
-            // 1b. Uložení loga soutěže (Badge)
+            // 1b. Uložení loga soutěže (Badge) s ochranou proti nechtěnému přepsání
             const badgeUrl = leagueObj?.strBadge || leagueObj?.strLogo;
             if (badgeUrl) {
                 const r2BadgeKey = `leagues/logos/${cfg.slug}.png`;
-                const bRes = await fetch(badgeUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
-                if (bRes.ok) {
-                    const bBuf = await bRes.arrayBuffer();
-                    await r2Client.send(new PutObjectCommand({
-                        Bucket: BUCKET_NAME,
-                        Key: r2BadgeKey,
-                        Body: Buffer.from(bBuf),
-                        ContentType: "image/png",
-                        CacheControl: "public, max-age=31536000, immutable"
-                    }));
-                    console.log(`✅ LOGO: ${leagueName} -> ${r2BadgeKey}`);
+                let exists = false;
+                try {
+                    await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: r2BadgeKey }));
+                    exists = true;
+                } catch (e) {}
+
+                if (!exists) {
+                    const bRes = await fetch(badgeUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
+                    if (bRes.ok) {
+                        const bBuf = await bRes.arrayBuffer();
+                        await r2Client.send(new PutObjectCommand({
+                            Bucket: BUCKET_NAME,
+                            Key: r2BadgeKey,
+                            Body: Buffer.from(bBuf),
+                            ContentType: "image/png",
+                            CacheControl: "public, max-age=31536000, immutable"
+                        }));
+                        console.log(`✅ LOGO: ${leagueName} -> ${r2BadgeKey}`);
+                    }
+                } else {
+                    console.log(`🛡️ LOGO: ${leagueName} už na R2 existuje, nepřepisuji.`);
                 }
             }
 
-            // 2. Uložení fotky stadionu / fanartu
+            // 2. Uložení fotky stadionu s ochranou proti přepsání
             const stadiumUrl = leagueObj?.strFanart1 || leagueObj?.strPoster || cfg.stadiumFallback;
             if (stadiumUrl) {
                 const r2StadiumKey = `leagues/stadiums/${cfg.slug}.webp`;
-                const sRes = await fetch(stadiumUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
-                if (sRes.ok) {
-                    const sBuf = await sRes.arrayBuffer();
-                    await r2Client.send(new PutObjectCommand({
-                        Bucket: BUCKET_NAME,
-                        Key: r2StadiumKey,
-                        Body: Buffer.from(sBuf),
-                        ContentType: "image/webp",
-                        CacheControl: "public, max-age=31536000, immutable"
-                    }));
-                    console.log(`🏟️ STADION: ${leagueName} -> ${r2StadiumKey}`);
+                let exists = false;
+                try {
+                    await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: r2StadiumKey }));
+                    exists = true;
+                } catch (e) {}
+
+                if (!exists) {
+                    const sRes = await fetch(stadiumUrl, { headers: browserHeaders, signal: AbortSignal.timeout(9000) });
+                    if (sRes.ok) {
+                        const sBuf = await sRes.arrayBuffer();
+                        await r2Client.send(new PutObjectCommand({
+                            Bucket: BUCKET_NAME,
+                            Key: r2StadiumKey,
+                            Body: Buffer.from(sBuf),
+                            ContentType: "image/webp",
+                            CacheControl: "public, max-age=31536000, immutable"
+                        }));
+                        console.log(`🏟️ STADION: ${leagueName} -> ${r2StadiumKey}`);
+                    }
+                } else {
+                    console.log(`🛡️ STADION: ${leagueName} už na R2 existuje, nepřepisuji.`);
                 }
             }
         } catch (err) {
