@@ -2405,7 +2405,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                 archetypeName: 'Nekalibrováno',
                 stats: { pre: 0, odv: 0, clu: 0, sta: 0, for: 0, efe: 0 },
                 badges: { streaks: 0, exacts: 0, draws: 0, maxRound: 0, roundWins: 0, perfektniKola: 0 },
-                backSide: { totalMatches: 0, bestCatch: 'Zatím bez odehraných zápasů', favTendency: '–' }
+                backSide: { totalMatches: 0, avgRoundPts: '0.0 b.', percentile: '–', favTendency: '–' }
             };
         }
 
@@ -2428,8 +2428,6 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         let odvahaCount = 0;
         let odvahaTotal = 0;
         let tip1Count = 0, tipXCount = 0, tip2Count = 0;
-        let bestMatchCatch = null;
-        let maxPtsCatch = -1;
 
         let cluWeightedHits = 0;
         let cluMatchesCount = 0;
@@ -2480,13 +2478,6 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             if (z.isTopMatch || isCloseOdds || isCloseMatch) {
                 cluMatchesCount++;
                 cluWeightedHits += hitWeight;
-            }
-
-            // Úlovek na rub karty
-            const ptsZ = vypocitejBodyZapasuLocal(tD, tH, rD, rH, tip.postup, z.postup, z.isPlayoff, z.isTopMatch, leagueName);
-            if (ptsZ > maxPtsCatch) {
-                maxPtsCatch = ptsZ;
-                bestMatchCatch = `${z.domaci} – ${z.hoste} (${tD}:${tH}, +${ptsZ} b.)`;
             }
         });
 
@@ -2598,6 +2589,15 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             favTendency = `1: ${p1} % | X: ${pX} % | 2: ${p2} %`;
         }
 
+        // --- VÝPOČET PRO RUB KARTY: PRŮMĚR NA KOLO & LIGOVÝ PERCENTIL ---
+        const numRoundsBot = Math.max(1, odehranaKolaKliceBot.length);
+        const avgRoundPts = (bodyZiskane / numRoundsBot).toFixed(1);
+
+        const allUsersList = Object.values(zebricekMapa);
+        const totalLeaguePlayers = allUsersList.length;
+        const worsePlayersCount = allUsersList.filter(p => (isLiveMode ? (p.celkemBoduLive || 0) : (p.celkemBodu || 0)) < bodyZiskane).length;
+        const percentileVal = totalLeaguePlayers > 1 ? Math.min(99, Math.max(1, Math.round((worsePlayersCount / (totalLeaguePlayers - 1)) * 100))) : 50;
+
         return {
             ovr: ovr,
             tier: tier,
@@ -2621,7 +2621,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             },
             backSide: {
                 totalMatches: odehrano,
-                bestCatch: bestMatchCatch || 'Zatím bez úlovku',
+                avgRoundPts: `${avgRoundPts} b.`,
+                percentile: `Lepší než ${percentileVal} % tipérů`,
                 favTendency: favTendency
             }
         };
