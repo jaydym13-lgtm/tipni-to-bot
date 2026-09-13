@@ -1081,7 +1081,17 @@ async function generujHallOfFameR2() {
     const playersList = Object.values(playersMap).map(p => {
         const count = p.leaguesCards.length;
         const sumOvr = p.leaguesCards.reduce((acc, c) => acc + (c.futCard.ovr || 0), 0);
-        const masterOvr = Math.round(sumOvr / count);
+        const rawAvg = sumOvr / count;
+
+        // 🎯 KOEFICIENT VŠESTRANNOSTI (ZÁBĚROVÝ NÁSOBIČ PODLE POČTU HRANÝCH LIG)
+        let koef = 1.0;
+        if (count === 1) koef = 0.92;
+        else if (count === 2) koef = 0.96;
+        else if (count === 3) koef = 1.00;
+        else if (count === 4) koef = 1.03;
+        else if (count >= 5) koef = 1.05;
+
+        const masterOvr = Math.min(99, Math.round(rawAvg * koef));
 
         let bestLeague = p.leaguesCards[0].leagueName;
         let maxOvr = -1;
@@ -1820,9 +1830,13 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         }
     });
 
+    // ⏱️ PŘÍSNÉ CHRONOLOGICKÉ ŘAZENÍ OD NEJNOVĚJŠÍHO (8. KOLO PŘED 6. KOLEM)
+    totalniVybuchy.sort((a, b) => (Date.parse(b.datum) || 0) - (Date.parse(a.datum) || 0));
+    vlciSamotari.sort((a, b) => (Date.parse(b.datum) || 0) - (Date.parse(a.datum) || 0));
+
     return {
-        totalniVybuchy: totalniVybuchy.reverse(),
-        vlciSamotari: vlciSamotari.reverse(),
+        totalniVybuchy: totalniVybuchy,
+        vlciSamotari: vlciSamotari,
         zlatyDul: zlatyDul,
         stedrostKlubu: stedrostKlubu,
         nejcastejsiTip: topTip,
