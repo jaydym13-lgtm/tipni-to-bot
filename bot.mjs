@@ -2760,10 +2760,29 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         const totalTend = tip1Count + tipXCount + tip2Count;
         let favTendency = '–';
         if (totalTend > 0) {
-            const p1 = Math.round((tip1Count / totalTend) * 100);
-            const pX = Math.round((tipXCount / totalTend) * 100);
-            const p2 = Math.round((tip2Count / totalTend) * 100);
-            favTendency = `1: ${p1} % | X: ${pX} % | 2: ${p2} %`;
+            const raw = [
+                { key: '1', count: tip1Count, exact: (tip1Count / totalTend) * 100 },
+                { key: 'X', count: tipXCount, exact: (tipXCount / totalTend) * 100 },
+                { key: '2', count: tip2Count, exact: (tip2Count / totalTend) * 100 }
+            ];
+
+            raw.forEach(item => {
+                item.floor = Math.floor(item.exact);
+                item.rem = item.exact - item.floor;
+            });
+
+            const sumFloor = raw.reduce((sum, item) => sum + item.floor, 0);
+            const deficit = 100 - sumFloor;
+
+            // Seřazení podle největšího zbytku (při shodě podle vyššího počtu tipů)
+            const sortedByRem = [...raw].sort((a, b) => (b.rem - a.rem) || (b.count - a.count));
+            for (let i = 0; i < deficit; i++) {
+                sortedByRem[i].floor += 1;
+            }
+
+            const pMap = {};
+            raw.forEach(item => { pMap[item.key] = item.floor; });
+            favTendency = `1: ${pMap['1']} % | X: ${pMap['X']} % | 2: ${pMap['2']} %`;
         }
 
         // --- VÝPOČET PRO RUB KARTY: PRŮMĚR NA KOLO ---
