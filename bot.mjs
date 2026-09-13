@@ -1151,8 +1151,37 @@ async function generujHallOfFameR2() {
 
     playersList.sort((a, b) => b.masterOvr - a.masterOvr || a.nickname.localeCompare(b.nickname, 'cs'));
 
+    // 🏆 AUTORITATIVNÍ PŘEDVÝPOČET ŽEBŘÍČKŮ JEDNOTLIVÝCH LIG
+    const byLeagueMap = {};
+    SEZNAM_LIG.forEach(lName => {
+        const lb = RAM_LEAGUE_LEADERBOARDS[lName];
+        if (!lb || !lb.zebricek) return;
+
+        const leaguePlayers = [];
+        lb.zebricek.forEach(p => {
+            if (!p.uid || !p.futCard) return;
+            const odehrano = (p.natipovaneVyhodnocene || 0) + (p.nenatipovaneVyhodnocene || 0);
+            if (odehrano === 0) return;
+
+            leaguePlayers.push({
+                uid: p.uid,
+                nickname: p.nickname || 'Hráč',
+                ovr: p.futCard.ovr || 60,
+                tier: p.futCard.tier || 'bronze',
+                archetype: p.futCard.archetype || 'TAK',
+                archetypeName: p.futCard.archetypeName || 'Taktik',
+                points: p.celkemBodu || 0,
+                matches: odehrano
+            });
+        });
+
+        leaguePlayers.sort((a, b) => b.ovr - a.ovr || b.points - a.points || a.nickname.localeCompare(b.nickname, 'cs'));
+        byLeagueMap[lName] = leaguePlayers;
+    });
+
     const hofJson = {
-        players: playersList,
+        all: playersList,
+        byLeague: byLeagueMap,
         aktualizovano: new Date().toISOString()
     };
 
