@@ -1175,8 +1175,10 @@ async function generujHallOfFameR2() {
             });
         });
 
-        leaguePlayers.sort((a, b) => b.ovr - a.ovr || b.points - a.points || a.nickname.localeCompare(b.nickname, 'cs'));
-        byLeagueMap[lName] = leaguePlayers;
+        if (leaguePlayers.length > 0) {
+            leaguePlayers.sort((a, b) => b.ovr - a.ovr || b.points - a.points || a.nickname.localeCompare(b.nickname, 'cs'));
+            byLeagueMap[lName] = leaguePlayers;
+        }
     });
 
     const hofJson = {
