@@ -2607,16 +2607,16 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             else if (tD === tH) tipXCount++;
             else tip2Count++;
 
-            // Odvaha: Skutečný outsider (kurz >= 3.50, remíza >= 3.80) nebo tip silně proti proudu (< 15 % ligy)
+            // Odvaha: Tip na remízu (tD === tH), outsidera (kurz >= 2.90) nebo volba proti proudu (< 22 % ligy)
             const consensus = zapasyConsensusBot[mId] || { p1: 0.33, pX: 0.33, p2: 0.33 };
             const oddsDom = z?.odds?.['1'] || z?.odds?.[1] || 0;
-            const oddsRem = z?.odds?.['X'] || z?.odds?.['x'] || z?.odds?.X || 0;
             const oddsHost = z?.odds?.['2'] || z?.odds?.[2] || 0;
 
-            const isContrarian = (tD > tH && consensus.p1 < 0.15) || (tD === tH && consensus.pX < 0.15) || (tD < tH && consensus.p2 < 0.15);
-            const isUnderdog = (tD > tH && oddsDom >= 3.5) || (tH > tD && oddsHost >= 3.5) || (tD === tH && oddsRem >= 3.8);
+            const isContrarian = (tD > tH && consensus.p1 < 0.22) || (tD === tH && consensus.pX < 0.22) || (tD < tH && consensus.p2 < 0.22);
+            const isUnderdog = (tD > tH && oddsDom >= 2.9) || (tH > tD && oddsHost >= 2.9);
+            const isDraw = (tD === tH);
 
-            if (isContrarian || isUnderdog) odvahaCount++;
+            if (isDraw || isContrarian || isUnderdog) odvahaCount++;
 
             const jeDohranoNeboLive = (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null) || z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED";
             if (!jeDohranoNeboLive) return;
@@ -2654,9 +2654,9 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         const tendPart = Math.min(18, ((smartRatio * 0.7 + pureRatio * 0.4) / 0.45) * 18);
         const statPre = Math.min(99, Math.max(45, Math.round(44 + exactPart + tendPart)));
 
-        // --- 3. ODV (Odvaha): Podíl odvážných voleb (překalibrovaná vyvážená křivka) ---
+        // --- 3. ODV (Odvaha): Zdravý a dynamický ligový rozptyl (cca 42 až 92+) ---
         const ratioOdv = odvahaTotal > 0 ? (odvahaCount / odvahaTotal) : 0;
-        const statOdv = Math.min(99, Math.max(45, Math.round(55 + (ratioOdv / 0.55) * 40)));
+        const statOdv = Math.min(99, Math.max(40, Math.round(42 + (ratioOdv / 0.45) * 45)));
 
         // --- 4. CLU (Psychika): 55 % váha postavení v tabulce (tlak lídrů vs. dno) + 45 % TOP zápasy 🔥 ---
         const tableBaseClu = 48 + (percentileVal / 100) * 40; // 21. místo (~20 %) = ~56, TOP 3 (~90 %) = ~84
