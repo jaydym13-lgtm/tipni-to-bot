@@ -58,6 +58,9 @@ const RAM_CENTRAL_ODDS = {};
 let RAM_IS_SYNCING = false;
 const RAM_LAST_DATA_SIGNATURES = {};
 
+// 🏛️ RAM MEZIPAMĚŤ ŽEBŘÍČKŮ PRO GLOBÁLNÍ SÍŇ SLÁVY
+const RAM_LEAGUE_LEADERBOARDS = {};
+
 // 🧮 AUTONOMNÍ VÝPOČET SEZÓNNÍ FORMY TÝMU Z RAM (0 API VOLÁNÍ)
 function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
     const tymNorm = String(tym || '').trim().toLowerCase();
@@ -1048,11 +1051,131 @@ async function aktualizujLiveRadarR2() {
     }
 }
 
+// 🏛️ GENERÁTOR OFICIÁLNÍHO SOUBORU SÍNĚ SLÁVY NA CLOUDFLARE R2
+async function generujHallOfFameR2() {
+    const playersMap = {};
+
+    SEZNAM_LIG.forEach(lName => {
+        const lb = RAM_LEAGUE_LEADERBOARDS[lName];
+        if (!lb || !lb.zebricek) return;
+
+        lb.zebricek.forEach(p => {
+            if (!p.uid || !p.futCard) return;
+            const odehrano = (p.natipovaneVyhodnocene || 0) + (p.nenatipovaneVyhodnocene || 0);
+            if (odehrano === 0) return;
+
+            if (!playersMap[p.uid]) {
+                playersMap[p.uid] = {
+                    uid: p.uid,
+                    nickname: p.nickname || 'Hráč',
+                    leaguesCards: []
+                };
+            }
+            playersMap[p.uid].leaguesCards.push({
+                leagueName: lName,
+                futCard: p.futCard
+            });
+        });
+    });
+
+    const playersList = Object.values(playersMap).map(p => {
+        const count = p.leaguesCards.length;
+        const sumOvr = p.leaguesCards.reduce((acc, c) => acc + (c.futCard.ovr || 0), 0);
+        const masterOvr = Math.round(sumOvr / count);
+
+        let bestLeague = p.leaguesCards[0].leagueName;
+        let maxOvr = -1;
+        let sumPre = 0, sumOdv = 0, sumClu = 0, sumSta = 0, sumFor = 0, sumEfe = 0;
+        let maxStreak = 0, sumExacts = 0, sumDraws = 0, maxRound = 0, sumMatches = 0;
+        let sumAvgPts = 0;
+
+        p.leaguesCards.forEach(c => {
+            const fc = c.futCard;
+            if ((fc.ovr || 0) > maxOvr) {
+                maxOvr = fc.ovr;
+                bestLeague = c.leagueName;
+            }
+            sumPre += (fc.stats?.pre || 60);
+            sumOdv += (fc.stats?.odv || 60);
+            sumClu += (fc.stats?.clu || 60);
+            sumSta += (fc.stats?.sta || 60);
+            sumFor += (fc.stats?.for || 60);
+            sumEfe += (fc.stats?.efe || 60);
+
+            if ((fc.badges?.streaks || 0) > maxStreak) maxStreak = fc.badges.streaks;
+            sumExacts += (fc.badges?.exacts || 0);
+            sumDraws += (fc.badges?.draws || 0);
+            if ((fc.badges?.maxRound || 0) > maxRound) maxRound = fc.badges.maxRound;
+            sumMatches += (fc.backSide?.totalMatches || 0);
+            sumAvgPts += parseFloat(fc.backSide?.avgRoundPts || 0) || 0;
+        });
+
+        const bestCard = p.leaguesCards.find(c => c.leagueName === bestLeague)?.futCard || p.leaguesCards[0].futCard;
+
+        let tier = 'bronze';
+        if (masterOvr >= 90) tier = 'elite';
+        else if (masterOvr >= 80) tier = 'gold';
+        else if (masterOvr >= 70) tier = 'silver';
+
+        return {
+            uid: p.uid,
+            nickname: p.nickname,
+            masterOvr,
+            tier,
+            archetype: bestCard.archetype || 'TAK',
+            archetypeName: bestCard.archetypeName || 'Taktik',
+            specialization: `Specializace: ${bestLeague}`,
+            bestLeague,
+            leaguesCount: count,
+            stats: {
+                pre: Math.round(sumPre / count),
+                odv: Math.round(sumOdv / count),
+                clu: Math.round(sumClu / count),
+                sta: Math.round(sumSta / count),
+                for: Math.round(sumFor / count),
+                efe: Math.round(sumEfe / count)
+            },
+            badges: {
+                exacts: sumExacts,
+                streaks: maxStreak,
+                draws: sumDraws,
+                maxRound: maxRound
+            },
+            backSide: {
+                totalMatches: sumMatches,
+                avgRoundPts: `${(sumAvgPts / count).toFixed(1)} b.`,
+                favTendency: bestCard.backSide?.favTendency || '–'
+            }
+        };
+    });
+
+    playersList.sort((a, b) => b.masterOvr - a.masterOvr || a.nickname.localeCompare(b.nickname, 'cs'));
+
+    const hofJson = {
+        players: playersList,
+        aktualizovano: new Date().toISOString()
+    };
+
+    try {
+        await r2Client.send(new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: `sezony/${SEZONA_ID}/hall_of_fame.json`,
+            Body: JSON.stringify(hofJson, null, 2),
+            ContentType: "application/json",
+            CacheControl: "public, max-age=10, must-revalidate"
+        }));
+        console.log(`🏛️ R2 SÍŇ SLÁVY: Vygenerován oficiální žebříček pro ${playersList.length} hráčů.`);
+    } catch (err) {
+        console.error("❌ Selhalo uložení hall_of_fame.json do R2:", err.message);
+    }
+}
+
 // --- 🧮 AGREGÁTOR PAMĚTI ---
 async function rekonstruujAgregatyVsechny(forceWriteHistory = false) {
     for (const leagueName of SEZNAM_LIG) {
         await rekonstruujAgregatyProLigu(leagueName, forceWriteHistory);
     }
+    await generujHallOfFameR2();
     await aktualizujLiveRadarR2();
 }
 
@@ -2720,6 +2843,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const cistaDataZapasu = Object.entries(centralMatches).map(([id, z]) => 
         `${id}:${z.datum}_${z.vysledek_domaci}_${z.vysledek_hoste}_${z.apiStatus}_${z.isTopMatch}_${z.postup}`
     ).sort().join('|');
+
+    RAM_LEAGUE_LEADERBOARDS[leagueName] = leaderboardJson;
 
     const cisteBodyTabulky = zebricekPole.map(p => 
         `${p.uid}:${p.celkemBodu}_${p.presneVysledkyCount}_${p.spravneTendenceCount}_${p.celkemBoduLive}`
