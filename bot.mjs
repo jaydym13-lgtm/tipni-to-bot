@@ -2489,7 +2489,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             }
         });
 
-        // Přesnost: Přesné trefy tvoří základ až do 35 b., tendence jen dokreslují styl do 20 b.
+        // Přesnost: Přesné trefy tvoří základ až do 38 b., tendence jen dokreslují styl do 18 b.
         const exactRatio = odehrano > 0 ? (exactCount / odehrano) : 0;
         const smartRatio = odehrano > 0 ? (smartTendCount / odehrano) : 0;
         const pureRatio = odehrano > 0 ? (pureTendCount / odehrano) : 0;
@@ -2503,13 +2503,11 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
 
         // --- 4. CLU (Psychika): 55 % váha postavení v tabulce (tlak lídrů vs. dno) + 45 % TOP zápasy 🔥 ---
         const tableBaseClu = 48 + (percentileVal / 100) * 40; // 21. místo (~20 %) = ~56, TOP 3 (~90 %) = ~84
-        let topPerfClu = tableBaseClu;
+        let statClu = Math.round(tableBaseClu);
         if (topMatchesCount > 0) {
             const avgPtsInTop = topMatchesPoints / topMatchesCount;
-            topPerfClu = Math.min(95, Math.max(45, 50 + (avgPtsInTop / 6) * 42));
+            const topPerfClu = Math.min(95, Math.max(45, 50 + (avgPtsInTop / 6) * 42));
             statClu = Math.min(99, Math.max(45, Math.round(tableBaseClu * 0.55 + topPerfClu * 0.45)));
-        } else {
-            statClu = Math.min(99, Math.max(45, Math.round(tableBaseClu)));
         }
 
         // --- 5. FOR (Forma): Poslední 3 odehraná kola vůči průměru ligy v těchto kolech ---
@@ -2539,11 +2537,11 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             const leagueAvgRound = lTotals.avg / Math.max(1, odehranaKolaKliceBot.length);
             const meanRatio = leagueAvgRound > 0 ? (mean5 / leagueAvgRound) : 1.0;
 
-            const cvPenalty = Math.min(32, cv5 * 28);
-            const performanceBonus = Math.min(18, Math.max(-18, (meanRatio - 1.0) * 24));
+            const cvPenalty = Math.min(30, cv5 * 25);
+            const performanceBonus = Math.min(20, Math.max(-20, (meanRatio - 1.0) * 25));
             const missedPenalty = nenatipovano * 3;
 
-            statSta = Math.min(99, Math.max(40, Math.round(78 - cvPenalty + performanceBonus - missedPenalty)));
+            statSta = Math.min(99, Math.max(40, Math.round(75 - cvPenalty + performanceBonus - missedPenalty)));
         }
 
         // --- SÉRIE & REMÍZY ---
