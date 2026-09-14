@@ -19,7 +19,7 @@ const LIGY_API_MAPA = {
     "Premier League": { id: "4328", provider: "THESPORTSDB" },
     "MS ve fotbale": { id: "4429", provider: "THESPORTSDB" },
     "Tipsport Extraliga": { id: "4923", provider: "THESPORTSDB" },
-    "MS v hokeji": { id: "4859", provider: "THESPORTSDB" },
+    "MS v hokeji": { id: "4976", provider: "THESPORTSDB" },
     "Liga mistrů": { id: "4480", provider: "THESPORTSDB" }
 };
 
@@ -1085,11 +1085,11 @@ async function generujHallOfFameR2() {
 
         // 🎯 KOEFICIENT VŠESTRANNOSTI (ZÁBĚROVÝ NÁSOBIČ PODLE POČTU HRANÝCH LIG)
         let koef = 1.0;
-        if (count === 1) koef = 0.92;
-        else if (count === 2) koef = 0.96;
+        if (count === 1) koef = 0.97;
+        else if (count === 2) koef = 0.99;
         else if (count === 3) koef = 1.00;
-        else if (count === 4) koef = 1.03;
-        else if (count >= 5) koef = 1.05;
+        else if (count === 4) koef = 1.01;
+        else if (count >= 5) koef = 1.02;
 
         const masterOvr = Math.min(99, Math.round(rawAvg * koef));
 
@@ -3389,6 +3389,9 @@ async function synchronizujRozpisyVsechLig() {
 
                     if (!jeBezezmeny) {
                         ligaZmenena = true;
+                        if (stary.domaci && (stary.domaci !== matchPayload.domaci || stary.hoste !== matchPayload.hoste)) {
+                            console.log(`🔄 OTOČENÍ POŘADATELSTVÍ [${leagueName}]: ${stary.domaci} vs ${stary.hoste} ➔ ${matchPayload.domaci} vs ${matchPayload.hoste}`);
+                        }
                         if (!RAM_CENTRAL_MATCHES[leagueName]) RAM_CENTRAL_MATCHES[leagueName] = {};
                         RAM_CENTRAL_MATCHES[leagueName][apiId] = {
                             ...stary,
@@ -3398,7 +3401,6 @@ async function synchronizujRozpisyVsechLig() {
                         const docRef = db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").doc(apiId);
                         batch.set(docRef, matchPayload, { merge: true });
                         batchOpCount++;
-
                         if (batchOpCount >= 450) {
                             await batch.commit();
                             batch = db.batch();
