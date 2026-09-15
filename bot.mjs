@@ -3171,8 +3171,32 @@ async function providniApiHeartbeat() {
                     const hasScore = liveItem.intHomeScore !== null && liveItem.intHomeScore !== undefined && String(liveItem.intHomeScore).trim() !== "" &&
                                      liveItem.intAwayScore !== null && liveItem.intAwayScore !== undefined && String(liveItem.intAwayScore).trim() !== "";
 
-                    let golyDomaci = hasScore ? parseInt(liveItem.intHomeScore, 10) : (stary.vysledek_domaci !== undefined ? stary.vysledek_domaci : 0);
-                    let golyHoste = hasScore ? parseInt(liveItem.intAwayScore, 10) : (stary.vysledek_hoste !== undefined ? stary.vysledek_hoste : 0);
+                    let golyDomaci = stary.vysledek_domaci !== undefined ? stary.vysledek_domaci : 0;
+                    let golyHoste = stary.vysledek_hoste !== undefined ? stary.vysledek_hoste : 0;
+
+                    if (hasScore) {
+                        const rawApiHomeScore = parseInt(liveItem.intHomeScore, 10);
+                        const rawApiAwayScore = parseInt(liveItem.intAwayScore, 10);
+
+                        const nasDomaciNorm = PL_NORM(stary.domaci);
+                        const nasHosteNorm = PL_NORM(stary.hoste);
+
+                        const apiHomeNorm = PL_NORM(slovnikTymu[liveItem.strHomeTeam] || liveItem.strHomeTeam || "");
+                        const apiAwayNorm = PL_NORM(slovnikTymu[liveItem.strAwayTeam] || liveItem.strAwayTeam || "");
+
+                        // 🎯 DYNAMICKÉ PÁROVÁNÍ PODLE IDENTITY TÝMU
+                        if (apiHomeNorm.includes(nasDomaciNorm) || nasDomaciNorm.includes(apiHomeNorm)) {
+                            golyDomaci = rawApiHomeScore;
+                            golyHoste = rawApiAwayScore;
+                        } else if (apiAwayNorm.includes(nasDomaciNorm) || nasDomaciNorm.includes(apiAwayNorm)) {
+                            golyDomaci = rawApiAwayScore;
+                            golyHoste = rawApiHomeScore;
+                        } else {
+                            golyDomaci = rawApiHomeScore;
+                            golyHoste = rawApiAwayScore;
+                        }
+                    }
+
                     let novyStatus = isFinished ? "FINISHED" : "IN_PLAY";
 
                     const skoreSeZmenilo = (stary.vysledek_domaci !== golyDomaci) || (stary.vysledek_hoste !== golyHoste);
@@ -3338,6 +3362,22 @@ async function synchronizujRozpisyVsechLig() {
                         ? item._customIsPlayoff 
                         : (item.strStage && item.strStage !== "GROUP_STAGE" && item.strStage !== "REGULAR_SEASON");
 
+                    let finalDomaci = domaci;
+                    let finalHoste = hoste;
+
+                    // 🛡️ INTELIGENTNÍ DETEKTOR OTOČENÉHO POŘADATELSTVÍ Z THESPORTSDB
+                    if (item.strEvent && item.strEvent.includes(" vs ")) {
+                        const [eventDomRaw, eventHosRaw] = item.strEvent.split(" vs ").map(t => t.trim());
+                        const eventDom = slovnikTymu[eventDomRaw] || eventDomRaw;
+                        const eventHos = slovnikTymu[eventHosRaw] || eventHosRaw;
+
+                        if (domaci === eventHos && hoste === eventDom) {
+                            console.log(`🔄 AUTO-KOREKCE [${leagueName}]: ${domaci} vs ${hoste} ➔ srovnáno na ${eventDom} vs ${eventHos}`);
+                            finalDomaci = eventDom;
+                            finalHoste = eventHos;
+                        }
+                    }
+
                     const matchIsoDate = parsujZapasDatumDoIso(item);
                     let spravneKolo = item._customKolo || `${roundNum}. kolo`;
                     const stary = RAM_CENTRAL_MATCHES[leagueName]?.[apiId] || {};
@@ -3349,8 +3389,8 @@ async function synchronizujRozpisyVsechLig() {
                                         item.intAwayScore !== null && item.intAwayScore !== undefined && String(item.intAwayScore).trim() !== "";
 
                     const matchPayload = {
-                        domaci: domaci,
-                        hoste: hoste,
+                        domaci: finalDomaci,
+                        hoste: finalHoste,
                         datum: matchIsoDate,
                         kolo: spravneKolo,
                         isPlayoff: isPlayoff || false
@@ -3360,12 +3400,25 @@ async function synchronizujRozpisyVsechLig() {
                     const uzJeUzavrenyVDB = (stary.apiStatus === "FINISHED") || (stary.vysledek_domaci !== undefined && stary.vysledek_domaci !== null && stary.apiStatus !== "IN_PLAY" && stary.apiStatus !== "PAUSED");
 
                     if (!uzJeUzavrenyVDB && isFinishedApi && hasScoreApi) {
-                        const gDom = parseInt(item.intHomeScore, 10);
-                        const gHos = parseInt(item.intAwayScore, 10);
+                        const rawHomeScore = parseInt(item.intHomeScore, 10);
+                        const rawAwayScore = parseInt(item.intAwayScore, 10);
+
+                        const nasDomNorm = PL_NORM(finalDomaci);
+                        const apiHomeNorm = PL_NORM(domaci);
+
+                        let gDom = rawHomeScore;
+                        let gHos = rawAwayScore;
+
+                        // Pokud jsme pořadatelství otočili, přiřadíme skóre podle správných klubů
+                        if (nasDomNorm !== apiHomeNorm) {
+                            gDom = rawAwayScore;
+                            gHos = rawHomeScore;
+                        }
+
                         matchPayload.apiStatus = "FINISHED";
                         matchPayload.vysledek_domaci = gDom;
                         matchPayload.vysledek_hoste = gHos;
-                        console.log(`🛡️ KALENDÁŘ FALLBACK [${leagueName}]: Záchrana výsledku pro ${domaci} ${gDom}:${gHos} ${hoste} (FINISHED)`);
+                        console.log(`🛡️ KALENDÁŘ FALLBACK [${leagueName}]: Záchrana výsledku pro ${finalDomaci} ${gDom}:${gHos} ${finalHoste} (FINISHED)`);
                     } else if (isPostponed) {
                         matchPayload.apiStatus = "POSTPONED";
                     } else if (stary.apiStatus === "POSTPONED" && !isPostponed) {
