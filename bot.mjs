@@ -3393,24 +3393,46 @@ async function synchronizujRozpisyVsechLig() {
                     }
                 }
 
-                // 🧹 SAMOČISTICÍ ŠTÍT PRO EXTRALIGU: Odstraní duplikáty s nezkrácenými názvy z RAM i Firestore
-                if (leagueName === "Tipsport Extraliga") {
-                    const zapasyEL = RAM_CENTRAL_MATCHES["Tipsport Extraliga"] || {};
-                    for (const [mId, z] of Object.entries(zapasyEL)) {
-                        const dCiste = slovnikTymu[z.domaci] || z.domaci;
-                        const hCiste = slovnikTymu[z.hoste] || z.hoste;
-                        const jeNezarovnany = (z.domaci !== dCiste) || (z.hoste !== hCiste);
+                // 🧹 UNIVERZÁLNÍ DEDUPLIKÁTOR: Najde a smaže dvojčata v jakékoliv soutěži (ochrání natipované zápasy)
+                const videneZapasy = new Map();
+                const zapasyLigy = RAM_CENTRAL_MATCHES[leagueName] || {};
+                const ligaKlic = String(leagueName).replace(/ /g, "_");
 
-                        if (jeNezarovnany) {
-                            console.log(`🧹 ČISTIČ EXTRALIGA: Mažu nezarovnaný duplikát ${z.domaci} vs ${z.hoste} (${mId})`);
-                            delete RAM_CENTRAL_MATCHES["Tipsport Extraliga"][mId];
-                            ligaZmenena = true;
-                            await db.collection("ligy").doc("Tipsport Extraliga")
-                                .collection("sezony").doc(SEZONA_ID)
-                                .collection("zapasy").doc(mId)
-                                .delete()
-                                .catch(err => console.error(`Chyba mazání duplicity EL ${mId}:`, err.message));
-                        }
+                for (const [mId, z] of Object.entries(zapasyLigy)) {
+                    const normD = PL_NORM(slovnikTymu[z.domaci] || z.domaci);
+                    const normH = PL_NORM(slovnikTymu[z.hoste] || z.hoste);
+                    const koloKlic = String(z.kolo || "").trim().toLowerCase();
+                    const unikatniKlic = `${normD}_vs_${normH}_${koloKlic}`;
+
+                    if (videneZapasy.has(unikatniKlic)) {
+                        const puvodniId = videneZapasy.get(unikatniKlic);
+
+                        let puvodniMaTipy = false;
+                        let aktualniMaTipy = false;
+
+                        Object.values(RAM_USERS_TIPS).forEach(uSouteze => {
+                            const uTips = uSouteze[ligaKlic]?.tipy || {};
+                            if (uTips[puvodniId]) puvodniMaTipy = true;
+                            if (uTips[mId]) aktualniMaTipy = true;
+                        });
+
+                        // Ponecháme dokument s tipy hráčů, prázdný duplikát smažeme
+                        const idKSmazani = (!aktualniMaTipy && puvodniMaTipy) ? mId : (aktualniMaTipy && !puvodniMaTipy ? puvodniId : mId);
+                        const idKPonechani = (idKSmazani === mId) ? puvodniId : mId;
+
+                        console.log(`🧹 DEDUPLIKÁTOR [${leagueName}]: Nalezen duplikát ${z.domaci} vs ${z.hoste} (${z.kolo}). Mažu dokument ${idKSmazani}, ponechávám ${idKPonechani}.`);
+
+                        delete RAM_CENTRAL_MATCHES[leagueName][idKSmazani];
+                        ligaZmenena = true;
+                        await db.collection("ligy").doc(leagueName)
+                            .collection("sezony").doc(SEZONA_ID)
+                            .collection("zapasy").doc(idKSmazani)
+                            .delete()
+                            .catch(err => console.error(`Chyba mazání duplikátu ${idKSmazani}:`, err.message));
+
+                        videneZapasy.set(unikatniKlic, idKPonechani);
+                    } else {
+                        videneZapasy.set(unikatniKlic, mId);
                     }
                 }
 
