@@ -3368,24 +3368,51 @@ async function synchronizujRozpisyVsechLig() {
             }
 
             try {
-                // Stahujeme poslední odehrané kolo pro výsledky a nadcházející zápasy pro termíny
-                const [lastEvents, nextEvents] = await Promise.all([
-                    fetchSportApiTournamentEvents(leagueName, cfg, "last"),
-                    fetchSportApiTournamentEvents(leagueName, cfg, "next")
-                ]);
+                let ligaZmenena = false;
 
-                const eventsMap = new Map();
-                [...lastEvents, ...nextEvents].forEach(ev => {
-                    if (ev && ev.id) eventsMap.set(String(ev.id), ev);
-                });
-                const rawItems = Array.from(eventsMap.values());
-                console.log(`🔎 KALENDÁŘ [${leagueName}]: Načteno ${rawItems.length} zápasů ze SportAPI7.`);
+                // 🧹 SAMOČISTICÍ ŠTÍT PRO LIGU MISTRŮ: Vyčistí letní předkola z RAM i Firestore
+                if (leagueName === "Liga mistrů") {
+                    const zapasyLM = RAM_CENTRAL_MATCHES["Liga mistrů"] || {};
+                    for (const [mId, z] of Object.entries(zapasyLM)) {
+                        const matchMs = Date.parse(z.datum) || 0;
+                        const koloStr = String(z.kolo || "").toLowerCase();
+                        const jePredkolo = (matchMs > 0 && matchMs < Date.parse("2026-09-01T00:00:00Z")) ||
+                                           koloStr.includes("qualif") ||
+                                           koloStr.includes("prelim");
+
+                        if (jePredkolo) {
+                            console.log(`🧹 ČISTIČ LM: Mažu nechtěné předkolo ${z.domaci} vs ${z.hoste} (${mId})`);
+                            delete RAM_CENTRAL_MATCHES["Liga mistrů"][mId];
+                            ligaZmenena = true;
+                            await db.collection("ligy").doc("Liga mistrů")
+                                .collection("sezony").doc(SEZONA_ID)
+                                .collection("zapasy").doc(mId)
+                                .delete()
+                                .catch(err => console.error(`Chyba mazání předkola ${mId}:`, err.message));
+                        }
+                    }
+                }
+
+                // 🚀 Stahujeme VÝHRADNĚ nadcházející zápasy (žádné 'last', nulové plýtvání limitem)
+                const nextEvents = await fetchSportApiTournamentEvents(leagueName, cfg, "next");
+                console.log(`🔎 KALENDÁŘ [${leagueName}]: Načteno ${nextEvents.length} nadcházejících zápasů.`);
+
+                // Filtrujeme příchozí zápasy pro LM: Pouze ligová fáze (od září 2026) a jarní Play-off 2027
+                let itemsToProcess = nextEvents;
+                if (leagueName === "Liga mistrů") {
+                    itemsToProcess = nextEvents.filter(ev => {
+                        const matchMs = (ev.startTimestamp || 0) * 1000;
+                        const roundName = String(ev.roundInfo?.name || "").toLowerCase();
+                        const isQualifying = roundName.includes("qualif") || roundName.includes("prelim");
+                        const isBeforeSept2026 = matchMs > 0 && matchMs < Date.parse("2026-09-01T00:00:00Z");
+                        return !isQualifying && !isBeforeSept2026;
+                    });
+                }
 
                 let batch = db.batch();
                 let batchOpCount = 0;
-                let ligaZmenena = false;
 
-                for (const item of rawItems) {
+                for (const item of itemsToProcess) {
                     const rawDomaci = item.homeTeam?.name || "Neznámý";
                     const rawHoste = item.awayTeam?.name || "Neznámý";
                     const domaci = slovnikTymu[rawDomaci] || rawDomaci;
@@ -3405,6 +3432,15 @@ async function synchronizujRozpisyVsechLig() {
                         : new Date().toISOString();
 
                     let spravneKolo = isPlayoff ? "Play-off" : `${roundNum}. kolo`;
+
+                    // 🏆 Specifické ošetření pro Ligu mistrů: Jarní část 2027 dostane název Play-off, podzimní kola zůstanou 1.–8. kolo
+                    if (leagueName === "Liga mistrů") {
+                        const mMs = item.startTimestamp ? (item.startTimestamp * 1000) : 0;
+                        const matchDate = new Date(mMs);
+                        const isSpringPlayoff = (matchDate.getFullYear() >= 2027 && matchDate.getMonth() >= 1) || isPlayoff;
+                        spravneKolo = isSpringPlayoff ? "Play-off" : `${roundNum}. kolo`;
+                    }
+
                     const stary = RAM_CENTRAL_MATCHES[leagueName]?.[matchId] || {};
 
                     const statusObj = item.status || {};
