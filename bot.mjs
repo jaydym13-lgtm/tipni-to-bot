@@ -617,16 +617,16 @@ const slovnikTymu = {
     "HC Sparta Praha": "Sparta", "Sparta Praha": "Sparta", "Sparta": "Sparta",
     "HC Dynamo Pardubice": "Pardubice", "Dynamo Pardubice": "Pardubice", "Pardubice": "Pardubice",
     "HC Oceláři Třinec": "Třinec", "Oceláři Třinec": "Třinec", "HC Ocelari Trinec": "Třinec", "Ocelari Trinec": "Třinec", "Trinec": "Třinec", "Třinec": "Třinec",
-    "HC VÍTKOVICE RIDERA": "Vítkovice", "HC Vitkovice Ridera": "Vítkovice", "HC VÍTKOVICE": "Vítkovice", "VITKOVICE": "Vítkovice", "HC Vitkovice": "Vítkovice", "HC Vítkovice": "Vítkovice", "Vitkovice": "Vítkovice", "Vítkovice": "Vítkovice",
+    "HC Vítkovice Ridera": "Vítkovice", "HC VÍTKOVICE RIDERA": "Vítkovice", "HC Vitkovice Ridera": "Vítkovice", "HC VÍTKOVICE": "Vítkovice", "VITKOVICE": "Vítkovice", "HC Vitkovice": "Vítkovice", "HC Vítkovice": "Vítkovice", "Vitkovice": "Vítkovice", "Vítkovice": "Vítkovice",
     "Bílí Tygři Liberec": "Liberec", "Bili Tygri Liberec": "Liberec", "Liberec": "Liberec",
     "HC Kometa Brno": "Brno", "Kometa Brno": "Brno", "Brno": "Brno",
-    "Mountfield HK": "Hr. Králové", "Mountfield Hradec Kralove": "Hr. Králové",
-    "HC VERVA Litvínov": "Litvínov", "HC Verva Litvinov": "Litvínov", "Verva Litvinov": "Litvínov", "HC Litvinov": "Litvínov", "HC Litvínov": "Litvínov", "Litvinov": "Litvínov", "Litvínov": "Litvínov",
+    "Mountfield HK": "Hr. Králové", "Mountfield Hradec Kralove": "Hr. Králové", "Mountfield Hradec Králové": "Hr. Králové",
+    "HC Verva Litvínov": "Litvínov", "HC VERVA Litvínov": "Litvínov", "HC Verva Litvinov": "Litvínov", "Verva Litvinov": "Litvínov", "HC Litvinov": "Litvínov", "HC Litvínov": "Litvínov", "Litvinov": "Litvínov", "Litvínov": "Litvínov",
     "HC Olomouc": "Olomouc", "Olomouc": "Olomouc",
-    "BK Mladá Boleslav": "Ml. Boleslav", "BK Mlada Boleslav": "Ml. Boleslav",
+    "BK Mladá Boleslav": "Ml. Boleslav", "BK Mlada Boleslav": "Ml. Boleslav", "Mladá Boleslav": "Ml. Boleslav",
     "HC Škoda Plzeň": "Plzeň", "HC Skoda Plzen": "Plzeň", "Skoda Plzen": "Plzeň", "HC Plzen": "Plzeň", "HC Plzeň": "Plzeň", "Plzen": "Plzeň", "Plzeň": "Plzeň",
     "HC Energie Karlovy Vary": "K. Vary", "Energie Karlovy Vary": "K. Vary", "Karlovy Vary": "K. Vary",
-    "Rytíři Kladno": "Kladno", "Rytiri Kladno": "Kladno", "Kladno": "Kladno",
+    "HC Rytíři Kladno": "Kladno", "Rytíři Kladno": "Kladno", "Rytiri Kladno": "Kladno", "Kladno": "Kladno",
     "Banes Motor České Budějovice": "Č. Budějovice", "HC Motor České Budějovice": "Č. Budějovice", "Motor České Budějovice": "Č. Budějovice", "Ceske Budejovice": "Č. Budějovice", "České Budějovice": "Č. Budějovice",
     // 🏆 LIGA MISTRŮ (UEFA CHAMPIONS LEAGUE)
     "Real Madrid CF": "Real Madrid", "Real Madrid": "Real Madrid",
@@ -3393,6 +3393,27 @@ async function synchronizujRozpisyVsechLig() {
                     }
                 }
 
+                // 🧹 SAMOČISTICÍ ŠTÍT PRO EXTRALIGU: Odstraní duplikáty s nezkrácenými názvy z RAM i Firestore
+                if (leagueName === "Tipsport Extraliga") {
+                    const zapasyEL = RAM_CENTRAL_MATCHES["Tipsport Extraliga"] || {};
+                    for (const [mId, z] of Object.entries(zapasyEL)) {
+                        const dCiste = slovnikTymu[z.domaci] || z.domaci;
+                        const hCiste = slovnikTymu[z.hoste] || z.hoste;
+                        const jeNezarovnany = (z.domaci !== dCiste) || (z.hoste !== hCiste);
+
+                        if (jeNezarovnany) {
+                            console.log(`🧹 ČISTIČ EXTRALIGA: Mažu nezarovnaný duplikát ${z.domaci} vs ${z.hoste} (${mId})`);
+                            delete RAM_CENTRAL_MATCHES["Tipsport Extraliga"][mId];
+                            ligaZmenena = true;
+                            await db.collection("ligy").doc("Tipsport Extraliga")
+                                .collection("sezony").doc(SEZONA_ID)
+                                .collection("zapasy").doc(mId)
+                                .delete()
+                                .catch(err => console.error(`Chyba mazání duplicity EL ${mId}:`, err.message));
+                        }
+                    }
+                }
+
                 // 🚀 Stahujeme VÝHRADNĚ nadcházející zápasy (žádné 'last', nulové plýtvání limitem)
                 const nextEvents = await fetchSportApiTournamentEvents(leagueName, cfg, "next");
                 console.log(`🔎 KALENDÁŘ [${leagueName}]: Načteno ${nextEvents.length} nadcházejících zápasů.`);
@@ -3418,9 +3439,13 @@ async function synchronizujRozpisyVsechLig() {
                     const domaci = slovnikTymu[rawDomaci] || rawDomaci;
                     const hoste = slovnikTymu[rawHoste] || rawHoste;
 
-                    // 🛡️ OCHRANA EXISTUJÍCÍCH TIPŮ: Pokud zápas v databázi už existuje, zachováme jeho ID!
+                    // 🛡️ OCHRANA EXISTUJÍCÍCH TIPŮ: Robustní párování přes slovník i otočené pořadatelství
                     const existingEntry = Object.entries(RAM_CENTRAL_MATCHES[leagueName] || {}).find(([mId, z]) => {
-                        return (PL_NORM(z.domaci) === PL_NORM(domaci) && PL_NORM(z.hoste) === PL_NORM(hoste));
+                        const zDomNorm = PL_NORM(slovnikTymu[z.domaci] || z.domaci);
+                        const zHosNorm = PL_NORM(slovnikTymu[z.hoste] || z.hoste);
+                        const curDomNorm = PL_NORM(domaci);
+                        const curHosNorm = PL_NORM(hoste);
+                        return (zDomNorm === curDomNorm && zHosNorm === curHosNorm) || (zDomNorm === curHosNorm && zHosNorm === curDomNorm);
                     });
                     const matchId = existingEntry ? existingEntry[0] : String(item.id);
 
