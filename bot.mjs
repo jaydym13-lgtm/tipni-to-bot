@@ -444,9 +444,11 @@ async function smartSyncKurzu() {
 
     if (celkemNaparovano > 0) {
         await ulozKurzyDoR2();
+        // ⚽ Přepočítáme pouze fotbalové ligy, kterých se nové kurzy týkají
+        SEZNAM_LIG.filter(l => !l.includes("hokej") && !l.includes("Extraliga")).forEach(lName => {
+            planujRekonstrukciAgregatu(false, lName);
+        });
     }
-
-    await planujRekonstrukciAgregatu();
 }
 
 // 🏒 HOKEJ SMART SYNC: PŘÍSNÁ 3-FÁZOVÁ KONTROLA VÝHRADNĚ PRO TIPSPORT EXTRALIGU
@@ -536,9 +538,8 @@ async function smartSyncKurzuHokej() {
 
     if (celkemNaparovano > 0) {
         await ulozKurzyDoR2();
+        planujRekonstrukciAgregatu(false, "Tipsport Extraliga");
     }
-
-    await planujRekonstrukciAgregatu();
 }
 
 // 🎛️ GLOBÁLNÍ DYNAMICKÁ KONFIGURACE (Ovládaná ze Super Admin panelu přes Firestore)
@@ -761,31 +762,63 @@ async function uploadToR2(leagueName, filename, jsonData) {
     }
 }
 
-// ⚡ ATOMICKÁ EXECUTION QUEUE: Zpracovává změny okamžitě a bezpečně bez prodlev
-let isReconstructing = false;
-let pendingRerun = false;
-let pendingHistoryFlag = false;
+// ⚡ ATOMICKÁ DÁVKOVÁ FRONTA: Sdružuje požadavky a Síň slávy generuje přesně 1× na konci dávky
+const QUEUE_DIRTY_LEAGUES = new Set();
+const QUEUE_HISTORY_LEAGUES = new Set();
+let isQueueProcessing = false;
 
-async function planujRekonstrukciAgregatu(forceWriteHistory = false) {
-    if (forceWriteHistory) pendingHistoryFlag = true;
+function planujRekonstrukciAgregatu(arg1 = false, arg2 = null) {
+    let forceWriteHistory = false;
+    let targetLeague = null;
 
-    if (isReconstructing) {
-        pendingRerun = true;
-        return;
+    if (typeof arg1 === 'string') {
+        targetLeague = arg1;
+        forceWriteHistory = Boolean(arg2);
+    } else {
+        forceWriteHistory = Boolean(arg1);
+        targetLeague = typeof arg2 === 'string' ? arg2 : null;
     }
 
-    isReconstructing = true;
+    if (targetLeague) {
+        QUEUE_DIRTY_LEAGUES.add(targetLeague);
+        if (forceWriteHistory) QUEUE_HISTORY_LEAGUES.add(targetLeague);
+    } else {
+        SEZNAM_LIG.forEach(l => {
+            QUEUE_DIRTY_LEAGUES.add(l);
+            if (forceWriteHistory) QUEUE_HISTORY_LEAGUES.add(l);
+        });
+    }
+
+    spustFrontuPrepoctu();
+}
+
+async function spustFrontuPrepoctu() {
+    if (isQueueProcessing) return;
+    isQueueProcessing = true;
+
+    // Počkáme na vyprázdnění aktuálního Node.js cyklu (posbírá všechny současné změny ze sítě)
+    await Promise.resolve();
+
     try {
-        do {
-            pendingRerun = false;
-            const writeHistory = pendingHistoryFlag;
-            pendingHistoryFlag = false;
-            await rekonstruujAgregatyVsechny(writeHistory);
-        } while (pendingRerun);
+        while (QUEUE_DIRTY_LEAGUES.size > 0 || QUEUE_HISTORY_LEAGUES.size > 0) {
+            const ligyKPrepoctu = Array.from(QUEUE_DIRTY_LEAGUES);
+            const ligyKHistorii = new Set(QUEUE_HISTORY_LEAGUES);
+            QUEUE_DIRTY_LEAGUES.clear();
+            QUEUE_HISTORY_LEAGUES.clear();
+
+            for (const leagueName of ligyKPrepoctu) {
+                const writeHistory = ligyKHistorii.has(leagueName);
+                await rekonstruujAgregatyProLigu(leagueName, writeHistory);
+            }
+
+            // 🏛️ SÍŇ SLÁVY SE VYGENERUJE VÝHRADNĚ 1× PO DOKONČENÍ CELÉ DÁVKY
+            await generujHallOfFameR2();
+            await aktualizujLiveRadarR2();
+        }
     } catch (err) {
         console.error("❌ Chyba ve frontě přepočtu agregátů:", err);
     } finally {
-        isReconstructing = false;
+        isQueueProcessing = false;
     }
 }
 
@@ -913,7 +946,9 @@ function zapniReaktivniSluchatka() {
         }
     }, err => console.error("❌ Chyba streamu ovládání bota:", err));
 
+    let isFirstUsers = true;
     db.collection("users").onSnapshot(snapshot => {
+        if (isFirstUsers) { isFirstUsers = false; return; }
         if (!jeInicializovano) return;
         snapshot.docChanges().forEach(change => {
             const uid = change.doc.id;
@@ -936,8 +971,12 @@ function zapniReaktivniSluchatka() {
         planujRekonstrukciAgregatu();
     }, err => console.error("❌ Chyba streamu uživatelů:", err));
 
+    let isFirstSezony = true;
     db.collectionGroup("sezony").onSnapshot(snapshot => {
+        if (isFirstSezony) { isFirstSezony = false; return; }
         if (!jeInicializovano) return;
+
+        const dotceneLigy = new Set();
         snapshot.docChanges().forEach(change => {
             if (change.doc.id !== SEZONA_ID) return;
             if (!change.doc.ref.parent || !change.doc.ref.parent.parent) return;
@@ -947,13 +986,24 @@ function zapniReaktivniSluchatka() {
             } else {
                 const sData = change.doc.data() || {};
                 RAM_USERS_TIPS[uid] = sData.souteze || {};
+
+                // 🎯 Zjistíme, do kterých lig hráč reálně natipoval, a naplánujeme pouze je
+                Object.keys(sData.souteze || {}).forEach(lKlic => {
+                    const lName = lKlic.replace(/_/g, " ");
+                    if (SEZNAM_LIG.includes(lName)) dotceneLigy.add(lName);
+                });
             }
         });
-        planujRekonstrukciAgregatu(true);
+
+        if (dotceneLigy.size > 0) {
+            dotceneLigy.forEach(lName => planujRekonstrukciAgregatu(true, lName));
+        }
     }, err => console.error("❌ Chyba streamu sezón:", err));
 
     SEZNAM_LIG.forEach(leagueName => {
+        let isFirstZapasy = true;
         db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").onSnapshot(snapshot => {
+            if (isFirstZapasy) { isFirstZapasy = false; return; }
             if (!jeInicializovano || RAM_IS_SYNCING) return;
             let realnaZmena = false;
 
@@ -1016,7 +1066,7 @@ function zapniReaktivniSluchatka() {
 
             if (realnaZmena) {
                 console.log(`📡 ADMIN DETEKCE [${leagueName}]: Zaznamenána externí změna v databázi -> přepočítávám.`);
-                planujRekonstrukciAgregatu();
+                planujRekonstrukciAgregatu(false, leagueName);
             }
         }, err => console.error(`❌ Chyba streamu zápasů pro ${leagueName}:`, err));
     });
@@ -3218,8 +3268,11 @@ async function providniApiHeartbeat() {
             }
         }
 
-        for (const lName of zmeneneLigySet) {
-            await rekonstruujAgregatyProLigu(lName, true);
+        if (zmeneneLigySet.size > 0) {
+            for (const lName of zmeneneLigySet) {
+                await rekonstruujAgregatyProLigu(lName, true);
+            }
+            await generujHallOfFameR2();
         }
 
         if (celkovyObsahujeAktivniZapas) {
