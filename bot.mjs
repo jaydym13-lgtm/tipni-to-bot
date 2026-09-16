@@ -468,23 +468,23 @@ async function smartSyncKurzuHokej() {
         konecBloku.setDate(nyni.getDate() + dnyDoPondeli);
         konecBloku.setHours(15, 0, 0, 0);
     }
-    // 2. Blok: Pondělí 15:00 -> Středa 15:00 (pokrývá Út a St do 15:00)
-    else if ((den === 1 && hod >= 15) || den === 2 || (den === 3 && hod < 15)) {
-        const dnyOdPondeli = (den === 1) ? 0 : (den === 2 ? 1 : 2);
+    // 2. Blok: Pondělí 15:00 -> Čtvrtek 09:00 (pokrývá Út, St a Čt do 09:00)
+    else if ((den === 1 && hod >= 15) || den === 2 || den === 3 || (den === 4 && hod < 9)) {
+        const dnyOdPondeli = (den === 1) ? 0 : (den === 2 ? 1 : (den === 3 ? 2 : 3));
         startBloku.setDate(nyni.getDate() - dnyOdPondeli);
         startBloku.setHours(15, 0, 0, 0);
 
-        const dnyDoStredy = (den === 1) ? 2 : (den === 2 ? 1 : 0);
-        konecBloku.setDate(nyni.getDate() + dnyDoStredy);
-        konecBloku.setHours(15, 0, 0, 0);
+        const dnyDoCtvrtka = (den === 1) ? 3 : (den === 2 ? 2 : (den === 3 ? 1 : 0));
+        konecBloku.setDate(nyni.getDate() + dnyDoCtvrtka);
+        konecBloku.setHours(9, 0, 0, 0);
     }
-    // 3. Blok: Středa 15:00 -> Sobota 12:00 (pokrývá Čt, Pá a So do 12:00)
+    // 3. Blok: Čtvrtek 09:00 -> Sobota 12:00 (pokrývá Čt od 09:00, Pá a So do 12:00)
     else {
-        const dnyOdStredy = (den === 3) ? 0 : (den === 4 ? 1 : (den === 5 ? 2 : 3));
-        startBloku.setDate(nyni.getDate() - dnyOdStredy);
-        startBloku.setHours(15, 0, 0, 0);
+        const dnyOdCtvrtka = (den === 4) ? 0 : (den === 5 ? 1 : 2);
+        startBloku.setDate(nyni.getDate() - dnyOdCtvrtka);
+        startBloku.setHours(9, 0, 0, 0);
 
-        const dnyDoSoboty = (den === 3) ? 3 : (den === 4 ? 2 : (den === 5 ? 1 : 0));
+        const dnyDoSoboty = (den === 4) ? 2 : (den === 5 ? 1 : 0);
         konecBloku.setDate(nyni.getDate() + dnyDoSoboty);
         konecBloku.setHours(12, 0, 0, 0);
     }
@@ -513,11 +513,9 @@ async function smartSyncKurzuHokej() {
             const uzMaKurz = RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[matchKey] || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[z.id] || z.odds;
 
             if (!uzMaKurz) {
-                const dayKey = `ice-hockey_${datumIso}`;
-                if (!RAM_PROCESSED_ODDS_DAYS.has(dayKey)) {
-                    dnyKeStazeni.add(datumIso);
+                    // 🔓 DOČASNÉ ODEMKNUTÍ: Stáhne dny bez ohledu na záznam v paměti
+                    dnyKeStazeni[sportKlic].add(datumIso);
                 }
-            }
         }
     });
 
@@ -2616,12 +2614,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
             const tH = parseInt(tip.tip_hoste, 10);
             if (isNaN(tD) || isNaN(tH)) return;
 
-            odvahaTotal++;
-            if (tD > tH) tip1Count++;
-            else if (tD === tH) tipXCount++;
-            else tip2Count++;
-
             // Odvaha: Tip na remízu (tD === tH), outsidera (kurz >= 2.90) nebo volba proti proudu (< 22 % ligy)
+            odvahaTotal++;
             const consensus = zapasyConsensusBot[mId] || { p1: 0.33, pX: 0.33, p2: 0.33 };
             const oddsDom = z?.odds?.['1'] || z?.odds?.[1] || 0;
             const oddsHost = z?.odds?.['2'] || z?.odds?.[2] || 0;
@@ -2634,6 +2628,11 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
 
             const jeDohranoNeboLive = (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null) || z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED";
             if (!jeDohranoNeboLive) return;
+
+            // 🎯 PREFEROVANÁ TENDENCE: Počítá se výhradně ze zápasů, které jsou odehrané nebo právě běží LIVE
+            if (tD > tH) tip1Count++;
+            else if (tD === tH) tipXCount++;
+            else tip2Count++;
 
             const rD = parseInt(z.vysledek_domaci !== undefined ? z.vysledek_domaci : 0, 10);
             const rH = parseInt(z.vysledek_hoste !== undefined ? z.vysledek_hoste : 0, 10);
@@ -3565,6 +3564,38 @@ async function startEnterpriseApplication() {
     console.log("👑 CLOUD-NATIVE DAEMON: Inicializuji životní cyklus trvalého mozku...");
     console.log("=========================================================================");
 
+    // 1. Nejprve načteme mapu ID a existující kurzy z R2 do RAM
+    await nactiEventMapZR2();
+    if (Object.keys(RAM_EVENT_MAP).length === 0) {
+        console.log("🗺️ INICIALIZACE: event_map.json na R2 chybí, stahuji a ukládám novou mapu...");
+        await synchronizujSofaScoreEventMap();
+    }
+    await nactiKurzyZR2();
+    await nactiProcessedDaysZR2();
+
+    // 2. Teprve s plnou kurzovou pamětí provedeme startovní hydrataci a generování rozpisů
+    await hydratujDataZFirestore();
+    zapniReaktivniSluchatka();
+    // ⏱️ SMYČKA 1: 30s kontrola live výsledků (Kurzy se stahují POUZE přes signál /sync-odds v pondělí)
+    console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím 30s smyčku pro live výsledky...");
+    setInterval(() => {
+        providniApiHeartbeat().catch(err => console.error("❌ Chyba interního Heartbeatu:", err));
+    }, 30000);
+
+    // 🗺️ SMYČKA 3: Měsíční mapování ID (1. den v měsíci ve 02:00 ráno)
+    setInterval(() => {
+        const d = new Date();
+        const denVMesici = d.getDate(); // 1 = první den v měsíci
+        const hodina = d.getHours();
+        const minuta = d.getMinutes();
+
+        if (denVMesici === 1 && hodina === 2 && minuta < 5) {
+            console.log("⏰ ČASOVÝ TRIGGER: Spouštím měsíční generování mapy ID...");
+            synchronizujSofaScoreEventMap().catch(err => console.error("❌ Chyba měsíčního mapování:", err));
+        }
+    }, 5 * 60 * 1000);
+
+    // 🌐 OTEVŘENÍ SÍTĚ AŽ PO 100% NAČTENÍ DAT DO RAM (Garantuje, že /sync-odds nemine načtené zápasy)
     http.createServer((req, res) => {
         const url = req.url || "/";
 
@@ -3629,37 +3660,6 @@ async function startEnterpriseApplication() {
     }).listen(PORT, () => {
         console.log(`🌐 HEALTH CHECK PROBE: Síťový port ${PORT} bezpečně otevřen pro Render.`);
     });
-
-    // 1. Nejprve načteme mapu ID a existující kurzy z R2 do RAM
-    await nactiEventMapZR2();
-    if (Object.keys(RAM_EVENT_MAP).length === 0) {
-        console.log("🗺️ INICIALIZACE: event_map.json na R2 chybí, stahuji a ukládám novou mapu...");
-        await synchronizujSofaScoreEventMap();
-    }
-    await nactiKurzyZR2();
-    await nactiProcessedDaysZR2();
-
-    // 2. Teprve s plnou kurzovou pamětí provedeme startovní hydrataci a generování rozpisů
-    await hydratujDataZFirestore();
-    zapniReaktivniSluchatka();
-    // ⏱️ SMYČKA 1: 30s kontrola live výsledků (Kurzy se stahují POUZE přes signál /sync-odds v pondělí)
-    console.log("⏱️ AUTONOMNÍ ENGINE: Spouštím 30s smyčku pro live výsledky...");
-    setInterval(() => {
-        providniApiHeartbeat().catch(err => console.error("❌ Chyba interního Heartbeatu:", err));
-    }, 30000);
-
-    // 🗺️ SMYČKA 3: Měsíční mapování ID (1. den v měsíci ve 02:00 ráno)
-    setInterval(() => {
-        const d = new Date();
-        const denVMesici = d.getDate(); // 1 = první den v měsíci
-        const hodina = d.getHours();
-        const minuta = d.getMinutes();
-
-        if (denVMesici === 1 && hodina === 2 && minuta < 5) {
-            console.log("⏰ ČASOVÝ TRIGGER: Spouštím měsíční generování mapy ID...");
-            synchronizujSofaScoreEventMap().catch(err => console.error("❌ Chyba měsíčního mapování:", err));
-        }
-    }, 5 * 60 * 1000);
 }
 
 // 🏆 PUMPA TROFEJÍ A STADIONŮ: Stáhne oficiální trofeje i arény a uloží na Cloudflare R2
