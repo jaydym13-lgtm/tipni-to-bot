@@ -3175,12 +3175,20 @@ async function providniApiHeartbeat() {
             const centralZapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
             const zapasyPole = Object.values(centralZapasy);
 
-            // Zmrazení tipů přesně v T-0 výkopu
+            // Zmrazení tipů přesně v T-0 výkopu (ignoruje odložené zápasy)
             for (const [mId, stary] of Object.entries(centralZapasy)) {
-                if (stary.apiStatus === "FINISHED" || stary.spyUploaded) continue;
+                if (stary.apiStatus === "FINISHED" || stary.apiStatus === "POSTPONED" || stary.spyUploaded) continue;
 
                 const startMs = Date.parse(stary.datum);
                 const isPastKickoff = !isNaN(startMs) && (nyniMs >= startMs);
+
+                // Záchrana: Pokud je výkop více než 3,5 hodiny v minulosti a nemá skóre, je odložený
+                if (!isNaN(startMs) && (nyniMs - startMs > 3.5 * 60 * 60 * 1000) && stary.vysledek_domaci === undefined && stary.apiStatus !== "IN_PLAY") {
+                    stary.apiStatus = "POSTPONED";
+                    zmeneneLigySet.add(leagueName);
+                    continue;
+                }
+
                 if (isPastKickoff) {
                     console.log(`🔒 LOCK T-0 [${leagueName}]: Výkop zápasu ${stary.domaci} – ${stary.hoste}. Zmrazuji tipy!`);
                     stary.spyUploaded = true;
@@ -3188,10 +3196,10 @@ async function providniApiHeartbeat() {
                 }
             }
 
-            // Kontrola aktivního zápasu – začíná přesně v čase výkopu (rozdilMinut <= 0), ne 15 minut předem
+            // Kontrola aktivního zápasu – ignoruje odložené zápasy
             const maLiveZapas = zapasyPole.some(z => {
                 const isFinished = z.apiStatus === "FINISHED" || (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
-                if (isFinished) return false;
+                if (isFinished || z.apiStatus === "POSTPONED") return false;
                 const startMs = Date.parse(z.datum);
                 if (isNaN(startMs)) return false;
                 const rozdilMinut = (startMs - nyniMs) / (1000 * 60);
