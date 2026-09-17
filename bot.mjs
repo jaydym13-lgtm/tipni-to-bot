@@ -3428,28 +3428,26 @@ async function opravitVsechnyLigyKonsolidace() {
     console.log("🏁 GENERÁLNÍ OČISTA VŠECH LIG DOKONČENA.");
 }
 
-// 🔍 100% BEZPEČNÝ AUDIT ODEHRANÝCH ZÁPASŮ (ČISTÝ READ-ONLY, NULOVÝ ZÁPIS DO DB/R2, NULOVÝ ZÁSAH DO TIPŮ)
-async function auditOdehranychZapasu() {
+// 🔄 NAROVNÁVAČ OTOČENÝCH TÝMŮ: Prohodí zpět pouze názvy domácí/hosté (0 zásah do tipů, 0 změna gólů)
+async function narovnatOtoceneZapasu() {
     console.log("=========================================================================");
-    console.log("🔍 RENTGEN AUDIT: Spouštím kontrolu odehraných zápasů napříč všemi ligami...");
+    console.log("🔄 REVERSE ALIGNER: Spouštím narovnání otočených týmů u odehraných kol...");
     console.log("=========================================================================");
 
-    const ligyKAuditu = ["Chance Liga", "Premier League", "Tipsport Extraliga", "Liga mistrů"];
+    const ligyKOprave = ["Chance Liga", "Premier League", "Tipsport Extraliga", "Liga mistrů"];
 
-    for (const leagueName of ligyKAuditu) {
+    for (const leagueName of ligyKOprave) {
         const cfg = SOFASCORE_TOURNAMENTS[leagueName];
         if (!cfg) continue;
 
-        console.log(`\n--- 🔎 KONTROLA SOUTĚŽE: ${leagueName} ---`);
+        console.log(`\n--- 🔄 KONTROLA A OPRAVA: ${leagueName} ---`);
 
-        // Stáhneme oficiální odehrané zápasy (pouze pro čtení)
         const apiLastEvents = await fetchSportApiTournamentEvents(leagueName, cfg, "last", true);
         const centralZapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
 
-        let vPoradkuPocet = 0;
-        let otocenoTymyPocet = 0;
-        let nenalezenoVDB = 0;
-        const nalezyOtocenych = [];
+        let batch = db.batch();
+        let batchCount = 0;
+        let opravenoLigy = 0;
 
         for (const ev of apiLastEvents) {
             if (!ev || !ev.homeTeam || !ev.awayTeam) continue;
@@ -3458,77 +3456,67 @@ async function auditOdehranychZapasu() {
             const rawA = ev.awayTeam.name || "";
             const apiDom = slovnikTymu[rawH] || rawH;
             const apiHos = slovnikTymu[rawA] || rawA;
-            const apiGolyDom = ev.homeScore?.current;
-            const apiGolyHos = ev.awayScore?.current;
-            const koloText = ev.roundInfo?.round ? `${ev.roundInfo.round}. kolo` : (ev.roundInfo?.name || "–");
 
             const normApiD = PL_NORM(apiDom);
             const normApiH = PL_NORM(apiHos);
 
-            // Hledáme zápas v naší paměti (přímý nebo otočený)
+            // Najdeme zápas v paměti
             const dbEntry = Object.entries(centralZapasy).find(([mId, z]) => {
                 const zD = PL_NORM(slovnikTymu[z.domaci] || z.domaci);
                 const zH = PL_NORM(slovnikTymu[z.hoste] || z.hoste);
                 return (zD === normApiD && zH === normApiH) || (zD === normApiH && zH === normApiD);
             });
 
-            if (!dbEntry) {
-                nenalezenoVDB++;
-                continue;
-            }
+            if (!dbEntry) continue;
 
             const [mId, dbZapas] = dbEntry;
             const normDbD = PL_NORM(slovnikTymu[dbZapas.domaci] || dbZapas.domaci);
             const normDbH = PL_NORM(slovnikTymu[dbZapas.hoste] || dbZapas.hoste);
 
-            const jePrimePoradatelstvi = (normDbD === normApiD && normDbH === normApiH);
-            const jeOtocenePoradatelstvi = (normDbD === normApiH && normDbH === normApiD);
+            // Pokud jsou týmy prohozené, narovnáme je zpátky
+            if (normDbD === normApiH && normDbH === normApiD) {
+                console.log(`🔧 NAROVNÁVÁM [${leagueName} - ${dbZapas.kolo}]: ${dbZapas.domaci} vs ${dbZapas.hoste} ➔ ${apiDom} vs ${apiHos}`);
 
-            if (jePrimePoradatelstvi) {
-                vPoradkuPocet++;
-            } else if (jeOtocenePoradatelstvi) {
-                otocenoTymyPocet++;
+                // 1. Změna v RAM (pouze jména týmů!)
+                dbZapas.domaci = apiDom;
+                dbZapas.hoste = apiHos;
 
-                // Zjistíme, jak jsou v naší DB uložené góly vůči API
-                const dbGolyDom = dbZapas.vysledek_domaci;
-                const dbGolyHos = dbZapas.vysledek_hoste;
+                // 2. Zápis do Firestore
+                const docRef = db.collection("ligy").doc(leagueName)
+                    .collection("sezony").doc(SEZONA_ID)
+                    .collection("zapasy").doc(mId);
 
-                let stavSkore = "Neznámý";
-                if (dbGolyDom === apiGolyDom && dbGolyHos === apiGolyHos) {
-                    stavSkore = "⚠️ GÓLY ZŮSTALY PŮVODNÍ (nesedí k otočeným týmům v DB)";
-                } else if (dbGolyDom === apiGolyHos && dbGolyHos === apiGolyDom) {
-                    stavSkore = "🔄 GÓLY JSOU PŘETOČENÉ SPOLU S TÝMY";
-                } else {
-                    stavSkore = `Rozdíl skóre (DB: ${dbGolyDom}:${dbGolyHos} vs API: ${apiGolyDom}:${apiGolyHos})`;
-                }
-
-                nalezyOtocenych.push({
-                    kolo: koloText,
-                    id: mId,
-                    oficialneSofa: `${apiDom} vs ${apiHos} (${apiGolyDom}:${apiGolyHos})`,
-                    vNasiDatabaze: `${dbZapas.domaci} vs ${dbZapas.hoste} (${dbGolyDom}:${dbGolyHos})`,
-                    stavSkore: stavSkore
+                batch.update(docRef, {
+                    domaci: apiDom,
+                    hoste: apiHos
                 });
+                batchCount++;
+                opravenoLigy++;
+
+                if (batchCount >= 400) {
+                    await batch.commit();
+                    batch = db.batch();
+                    batchCount = 0;
+                }
             }
         }
 
-        console.log(`📊 SOUHRN [${leagueName}]:`);
-        console.log(`   ✅ V pořádku: ${vPoradkuPocet} zápasů`);
-        console.log(`   🚨 OTOČENÉ TÝMY: ${otocenoTymyPocet} zápasů`);
-        console.log(`   ❓ V API existuje, ale v DB není: ${nenalezenoVDB} zápasů`);
+        if (batchCount > 0) {
+            await batch.commit();
+        }
 
-        if (nalezyOtocenych.length > 0) {
-            console.log(`   📋 SEZNAM ZÁPASŮ S OTOČENÝM POŘADATELSTVÍM:`);
-            nalezyOtocenych.forEach(n => {
-                console.log(`      • [${n.kolo}] ID:${n.id}`);
-                console.log(`        - REALITA (SofaScore): ${n.oficialneSofa}`);
-                console.log(`        - V NAŠÍ DATABÁZI:     ${n.vNasiDatabaze}`);
-                console.log(`        - STAV SKÓRE:          ${n.stavSkore}`);
-            });
+        console.log(`✅ ${leagueName}: Narovnáno celkem ${opravenoLigy} zápasů.`);
+
+        // 3. Po narovnání ligy přepočítáme žebříček z netknutých tipů
+        if (opravenoLigy > 0) {
+            await rekonstruujAgregatyProLigu(leagueName, true);
         }
     }
+
+    await generujHallOfFameR2();
+    await aktualizujLiveRadarR2();
     console.log("\n=========================================================================");
-    console.log("🏁 RENTGEN AUDIT DOKONČEN. Žádná data nebyla změněna.");
+    console.log("🏁 VŠECHNY ZÁPASY ÚSPĚŠNĚ NAROVNÁNY. Žebříčky a rozpis na R2 jsou čisté.");
     console.log("=========================================================================");
 }
 
@@ -3928,11 +3916,11 @@ async function startEnterpriseApplication() {
             return;
         }
 
-        if (url === "/audit-history" || url.startsWith("/audit-history")) {
-            console.log("🔍 SERVISNÍ PING: Spouštím bezpečný audit odehraných zápasů (100% READ-ONLY)...");
-            auditOdehranychZapasu().catch(err => console.error("❌ Chyba auditu:", err));
+        if (url === "/fix-history" || url.startsWith("/fix-history")) {
+            console.log("🔄 SERVISNÍ PING: Spouštím narovnání otočených týmů...");
+            narovnatOtoceneZapasu().catch(err => console.error("❌ Chyba narovnání:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Bezpečný audit odehraných zápasů zahájen. Sleduj logy na Renderu.");
+            res.end("OK - Narovnání týmů zahájeno. Sleduj logy na Renderu.");
             return;
         }
 
