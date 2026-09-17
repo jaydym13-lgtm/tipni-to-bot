@@ -3345,6 +3345,121 @@ async function fetchSportApiTournamentEvents(leagueName, cfg, type = "next", isD
 
             const data = await res.json();
             const events = data.events || [];
+
+            // 🩺 GENERÁLNÍ KONSOLIDÁTOR EXTRALIGY: Sloučí tipy, vymaže zrcadlové zápasy a staré odložené duplikáty
+async function opravitExtraliguKonsolidace() {
+    console.log("=========================================================================");
+    console.log("🩺 REPAIR ENGINE: Zahajuji hloubkovou konsolidaci Tipsport Extraligy...");
+    console.log("=========================================================================");
+
+    const leagueName = "Tipsport Extraliga";
+    const ligaKlic = "Tipsport_Extraliga";
+    const zapasyEL = RAM_CENTRAL_MATCHES[leagueName] || {};
+    const zapasyArr = Object.entries(zapasyEL).map(([id, z]) => ({ ...z, id }));
+
+    // 1. Shlukování zápasů podle kol
+    const kolaMap = {};
+    zapasyArr.forEach(z => {
+        const k = String(z.kolo || "Šampionát").trim();
+        if (!kolaMap[k]) kolaMap[k] = [];
+        kolaMap[k].push(z);
+    });
+
+    const smazatIds = new Set();
+    const batchFirestore = db.batch();
+    let batchPocet = 0;
+    let sloucenoTipuCelkem = 0;
+
+    for (const [koloNazev, zapasyVKole] of Object.entries(kolaMap)) {
+        const tymyVKole = new Map(); // tymNorm -> matchObj
+
+        for (const zapas of zapasyVKole) {
+            const dNorm = PL_NORM(slovnikTymu[zapas.domaci] || zapas.domaci);
+            const hNorm = PL_NORM(slovnikTymu[zapas.hoste] || zapas.hoste);
+
+            // Detekce kolize: hraje už některý z týmů v tomto kole jiný zápas?
+            const existujiciD = tymyVKole.get(dNorm);
+            const existujiciH = tymyVKole.get(hNorm);
+            const kolizniZapas = existujiciD || existujiciH;
+
+            if (kolizniZapas && kolizniZapas.id !== zapas.id) {
+                // Máme v jednom kole dva zápasy se stejnými týmy (buď otočené, nebo odložený vs přeplánovaný)
+                console.log(`⚠️ DETEKOVÁNA KOLIZE v ${koloNazev}: [${zapas.domaci} vs ${zapas.hoste}] koliduje s [${kolizniZapas.domaci} vs ${kolizniZapas.hoste}]`);
+
+                // Výběr platného zápasu: preferujeme ten, který NENÍ odložený a má platné datum
+                let spravnyZapas = kolizniZapas;
+                let zmetekZapas = zapas;
+
+                if (kolizniZapas.apiStatus === "POSTPONED" && zapas.apiStatus !== "POSTPONED") {
+                    spravnyZapas = zapas;
+                    zmetekZapas = kolizniZapas;
+                }
+
+                // 2. Přelití tipů ze zmetku do správného zápasu pro všechny hráče
+                for (const uid of Object.keys(RAM_USERS_PROFILES)) {
+                    const uSouteze = RAM_USERS_TIPS[uid] || {};
+                    const uTips = uSouteze[ligaKlic]?.tipy || {};
+                    const tipNaZmetku = uTips[zmetekZapas.id];
+                    const tipNaSpravnem = uTips[spravnyZapas.id];
+
+                    if (tipNaZmetku && !tipNaSpravnem) {
+                        // Přeneseme tip hráče na platné ID v paměti RAM
+                        if (!RAM_USERS_TIPS[uid][ligaKlic]) RAM_USERS_TIPS[uid][ligaKlic] = { tipy: {} };
+                        RAM_USERS_TIPS[uid][ligaKlic].tipy[spravnyZapas.id] = {
+                            ...tipNaZmetku,
+                            matchId: spravnyZapas.id
+                        };
+
+                        // Zápis přeneseného tipu do Firestore
+                        const userSezonaRef = db.collection("users").doc(uid).collection("sezony").doc(SEZONA_ID);
+                        batchFirestore.set(userSezonaRef, {
+                            souteze: {
+                                [ligaKlic]: {
+                                    tipy: {
+                                        [spravnyZapas.id]: {
+                                            ...tipNaZmetku,
+                                            matchId: spravnyZapas.id
+                                        },
+                                        [zmetekZapas.id]: admin.firestore.FieldValue.delete()
+                                    }
+                                }
+                            }
+                        }, { merge: true });
+                        batchPocet++;
+                        sloucenoTipuCelkem++;
+                    }
+                }
+
+                smazatIds.add(zmetekZapas.id);
+            } else {
+                tymyVKole.set(dNorm, zapas);
+                tymyVKole.set(hNorm, zapas);
+            }
+        }
+    }
+
+    // 3. Fyzické smazání zmetků z Firestore
+    for (const id of smazatIds) {
+        console.log(`🗑️ MAŽU DUPLIKÁT Z FIRESTORE: ${id} (${zapasyEL[id]?.domaci} vs ${zapasyEL[id]?.hoste})`);
+        delete RAM_CENTRAL_MATCHES[leagueName][id];
+        const docRef = db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").doc(id);
+        batchFirestore.delete(docRef);
+        batchPocet++;
+    }
+
+    if (batchPocet > 0) {
+        await batchFirestore.commit();
+        console.log(`💾 REPAIR DOKONČEN: Smazáno ${smazatIds.size} zmetků, zachráněno/sloučeno ${sloucenoTipuCelkem} tipů.`);
+    } else {
+        console.log("🛡️ REPAIR DOKONČEN: Žádné duplicity nebyly nalezeny.");
+    }
+
+    // 4. Okamžitá regenerace a odeslání čistých dat na Cloudflare R2
+    await rekonstruujAgregatyProLigu(leagueName, true);
+    await generujHallOfFameR2();
+    await aktualizujLiveRadarR2();
+}
+
             allEvents.push(...events);
 
             // Pokud neběží hloubkový audit (běžný den) NEBO stránka vrátila méně než 30 zápasů (konec sezóny), končíme
@@ -3693,6 +3808,16 @@ async function startEnterpriseApplication() {
 
         if (url === "/sync-fixtures" || url.startsWith("/sync-fixtures")) {
             const isDeep = url.includes("deep=true");
+            const isRepair = url.includes("repair=true");
+
+            if (isRepair) {
+                console.log("🩺 SERVISNÍ PING: Spouštím opravnou konsolidaci Tipsport Extraligy...");
+                opravitExtraliguKonsolidace().catch(err => console.error("❌ Chyba konsolidace:", err));
+                res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+                res.end("OK - Hloubková konsolidace Extraligy a sloučení tipů zahájeno.");
+                return;
+            }
+
             console.log(`📅 SERVISNÍ PING (/sync-fixtures, deep=${isDeep}): Spouštím kontrolu kalendářů...`);
             synchronizujRozpisyVsechLig(isDeep).catch(err => console.error("❌ Chyba rozpisů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
