@@ -3314,39 +3314,7 @@ async function providniApiHeartbeat() {
     }
 }
 
-// 📡 Pomocný stahovač zápasů z turnajového feedu SportAPI7 (podpora stránkování 0, 1, 2...)
-async function fetchSportApiTournamentEvents(leagueName, cfg, type = "next", isDeep = false) {
-    if (!RAPIDAPI_KEY) return [];
-    const prefix = cfg.isUnique ? "unique-tournament" : "tournament";
-    const allEvents = [];
-    let page = 0;
-    let hasMore = true;
-
-    while (hasMore) {
-        const url = `https://sportapi7.p.rapidapi.com/api/v1/${prefix}/${cfg.id}/season/${cfg.seasonId}/events/${type}/${page}`;
-        try {
-            const res = await fetch(url, {
-                headers: {
-                    "x-rapidapi-key": RAPIDAPI_KEY,
-                    "x-rapidapi-host": "sportapi7.p.rapidapi.com"
-                },
-                signal: AbortSignal.timeout(9000)
-            });
-
-            const remaining = res.headers.get("x-ratelimit-requests-remaining");
-            if (remaining !== null) {
-                console.log(`📊 SPORTAPI7 [Kalendář ${leagueName} (${type}, str. ${page})]: Zbývá ${remaining} requestů do limitu.`);
-            }
-
-            if (!res.ok) {
-                console.warn(`⚠️ KALENDÁŘ [${leagueName} - ${type} str. ${page}]: API status ${res.status}`);
-                break;
-            }
-
-            const data = await res.json();
-            const events = data.events || [];
-
-            // 🩺 GENERÁLNÍ KONSOLIDÁTOR EXTRALIGY: Sloučí tipy, vymaže zrcadlové zápasy a staré odložené duplikáty
+// 🩺 GENERÁLNÍ KONSOLIDÁTOR EXTRALIGY: Sloučí tipy, vymaže zrcadlové zápasy a staré odložené duplikáty
 async function opravitExtraliguKonsolidace() {
     console.log("=========================================================================");
     console.log("🩺 REPAIR ENGINE: Zahajuji hloubkovou konsolidaci Tipsport Extraligy...");
@@ -3383,7 +3351,6 @@ async function opravitExtraliguKonsolidace() {
             const kolizniZapas = existujiciD || existujiciH;
 
             if (kolizniZapas && kolizniZapas.id !== zapas.id) {
-                // Máme v jednom kole dva zápasy se stejnými týmy (buď otočené, nebo odložený vs přeplánovaný)
                 console.log(`⚠️ DETEKOVÁNA KOLIZE v ${koloNazev}: [${zapas.domaci} vs ${zapas.hoste}] koliduje s [${kolizniZapas.domaci} vs ${kolizniZapas.hoste}]`);
 
                 // Výběr platného zápasu: preferujeme ten, který NENÍ odložený a má platné datum
@@ -3403,14 +3370,12 @@ async function opravitExtraliguKonsolidace() {
                     const tipNaSpravnem = uTips[spravnyZapas.id];
 
                     if (tipNaZmetku && !tipNaSpravnem) {
-                        // Přeneseme tip hráče na platné ID v paměti RAM
                         if (!RAM_USERS_TIPS[uid][ligaKlic]) RAM_USERS_TIPS[uid][ligaKlic] = { tipy: {} };
                         RAM_USERS_TIPS[uid][ligaKlic].tipy[spravnyZapas.id] = {
                             ...tipNaZmetku,
                             matchId: spravnyZapas.id
                         };
 
-                        // Zápis přeneseného tipu do Firestore
                         const userSezonaRef = db.collection("users").doc(uid).collection("sezony").doc(SEZONA_ID);
                         batchFirestore.set(userSezonaRef, {
                             souteze: {
@@ -3460,6 +3425,37 @@ async function opravitExtraliguKonsolidace() {
     await aktualizujLiveRadarR2();
 }
 
+// 📡 Pomocný stahovač zápasů z turnajového feedu SportAPI7 (podpora stránkování 0, 1, 2...)
+async function fetchSportApiTournamentEvents(leagueName, cfg, type = "next", isDeep = false) {
+    if (!RAPIDAPI_KEY) return [];
+    const prefix = cfg.isUnique ? "unique-tournament" : "tournament";
+    const allEvents = [];
+    let page = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+        const url = `https://sportapi7.p.rapidapi.com/api/v1/${prefix}/${cfg.id}/season/${cfg.seasonId}/events/${type}/${page}`;
+        try {
+            const res = await fetch(url, {
+                headers: {
+                    "x-rapidapi-key": RAPIDAPI_KEY,
+                    "x-rapidapi-host": "sportapi7.p.rapidapi.com"
+                },
+                signal: AbortSignal.timeout(9000)
+            });
+
+            const remaining = res.headers.get("x-ratelimit-requests-remaining");
+            if (remaining !== null) {
+                console.log(`📊 SPORTAPI7 [Kalendář ${leagueName} (${type}, str. ${page})]: Zbývá ${remaining} requestů do limitu.`);
+            }
+
+            if (!res.ok) {
+                console.warn(`⚠️ KALENDÁŘ [${leagueName} - ${type} str. ${page}]: API status ${res.status}`);
+                break;
+            }
+
+            const data = await res.json();
+            const events = data.events || [];
             allEvents.push(...events);
 
             // Pokud neběží hloubkový audit (běžný den) NEBO stránka vrátila méně než 30 zápasů (konec sezóny), končíme
