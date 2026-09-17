@@ -3428,10 +3428,10 @@ async function opravitVsechnyLigyKonsolidace() {
     console.log("🏁 GENERÁLNÍ OČISTA VŠECH LIG DOKONČENA.");
 }
 
-// 🔄 NAROVNÁVAČ OTOČENÝCH TÝMŮ: Prohodí zpět pouze názvy domácí/hosté (0 zásah do tipů, 0 změna gólů)
+// 🔄 KOMPLETNÍ RESTORER ODEHRANÝCH KOL: Vrátí správná kola (1-4 v PL, 1-8 v Chance), data i pořadatelství týmů
 async function narovnatOtoceneZapasu() {
     console.log("=========================================================================");
-    console.log("🔄 REVERSE ALIGNER: Spouštím narovnání otočených týmů u odehraných kol...");
+    console.log("🔄 RESTORER ENGINE: Vracím odehraným zápasům skutečná kola, data i stadiony...");
     console.log("=========================================================================");
 
     const ligyKOprave = ["Chance Liga", "Premier League", "Tipsport Extraliga", "Liga mistrů"];
@@ -3440,7 +3440,7 @@ async function narovnatOtoceneZapasu() {
         const cfg = SOFASCORE_TOURNAMENTS[leagueName];
         if (!cfg) continue;
 
-        console.log(`\n--- 🔄 KONTROLA A OPRAVA: ${leagueName} ---`);
+        console.log(`\n--- 🔄 KONTROLA A OBNOVA: ${leagueName} ---`);
 
         const apiLastEvents = await fetchSportApiTournamentEvents(leagueName, cfg, "last", true);
         const centralZapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
@@ -3457,10 +3457,14 @@ async function narovnatOtoceneZapasu() {
             const apiDom = slovnikTymu[rawH] || rawH;
             const apiHos = slovnikTymu[rawA] || rawA;
 
+            const apiRoundNum = ev.roundInfo?.round;
+            const spravneKolo = apiRoundNum ? `${apiRoundNum}. kolo` : (ev.roundInfo?.name || "1. kolo");
+            const spravneDatum = ev.startTimestamp ? new Date(ev.startTimestamp * 1000).toISOString() : null;
+
             const normApiD = PL_NORM(apiDom);
             const normApiH = PL_NORM(apiHos);
 
-            // Najdeme zápas v paměti
+            // Najdeme odpovídající odehraný zápas v DB podle dvojice týmů
             const dbEntry = Object.entries(centralZapasy).find(([mId, z]) => {
                 const zD = PL_NORM(slovnikTymu[z.domaci] || z.domaci);
                 const zH = PL_NORM(slovnikTymu[z.hoste] || z.hoste);
@@ -3473,23 +3477,32 @@ async function narovnatOtoceneZapasu() {
             const normDbD = PL_NORM(slovnikTymu[dbZapas.domaci] || dbZapas.domaci);
             const normDbH = PL_NORM(slovnikTymu[dbZapas.hoste] || dbZapas.hoste);
 
-            // Pokud jsou týmy prohozené, narovnáme je zpátky
-            if (normDbD === normApiH && normDbH === normApiD) {
-                console.log(`🔧 NAROVNÁVÁM [${leagueName} - ${dbZapas.kolo}]: ${dbZapas.domaci} vs ${dbZapas.hoste} ➔ ${apiDom} vs ${apiHos}`);
+            const potrebujeTymy = (normDbD !== normApiD || normDbH !== normApiH);
+            const potrebujeKolo = (dbZapas.kolo !== spravneKolo);
+            const potrebujeDatum = Boolean(spravneDatum && dbZapas.datum !== spravneDatum);
 
-                // 1. Změna v RAM (pouze jména týmů!)
+            if (potrebujeTymy || potrebujeKolo || potrebujeDatum) {
+                console.log(`🔧 OBNOVUJI [${leagueName}]: ${dbZapas.domaci} vs ${dbZapas.hoste} (${dbZapas.kolo}) ➔ ${apiDom} vs ${apiHos} (${spravneKolo})`);
+
+                // 1. Změna v RAM
                 dbZapas.domaci = apiDom;
                 dbZapas.hoste = apiHos;
+                dbZapas.kolo = spravneKolo;
+                if (spravneDatum) dbZapas.datum = spravneDatum;
 
-                // 2. Zápis do Firestore
+                // 2. Zápis do Firestore (pouze metadata zápasu, 0 zásah do tipů!)
                 const docRef = db.collection("ligy").doc(leagueName)
                     .collection("sezony").doc(SEZONA_ID)
                     .collection("zapasy").doc(mId);
 
-                batch.update(docRef, {
+                const updatePayload = {
                     domaci: apiDom,
-                    hoste: apiHos
-                });
+                    hoste: apiHos,
+                    kolo: spravneKolo
+                };
+                if (spravneDatum) updatePayload.datum = spravneDatum;
+
+                batch.update(docRef, updatePayload);
                 batchCount++;
                 opravenoLigy++;
 
@@ -3505,9 +3518,9 @@ async function narovnatOtoceneZapasu() {
             await batch.commit();
         }
 
-        console.log(`✅ ${leagueName}: Narovnáno celkem ${opravenoLigy} zápasů.`);
+        console.log(`✅ ${leagueName}: Kompletně obnoveno ${opravenoLigy} zápasů do správných kol.`);
 
-        // 3. Po narovnání ligy přepočítáme žebříček z netknutých tipů
+        // 3. Po návratu do správných kol přepočítáme oficiální agregáty
         if (opravenoLigy > 0) {
             await rekonstruujAgregatyProLigu(leagueName, true);
         }
@@ -3516,7 +3529,7 @@ async function narovnatOtoceneZapasu() {
     await generujHallOfFameR2();
     await aktualizujLiveRadarR2();
     console.log("\n=========================================================================");
-    console.log("🏁 VŠECHNY ZÁPASY ÚSPĚŠNĚ NAROVNÁNY. Žebříčky a rozpis na R2 jsou čisté.");
+    console.log("🏁 VŠECHNA ODEHRANÁ KOLA (1-4 v PL, 1-8 v Chance) JSOU ZPÁTKY NA SVÝCH MÍSTECH.");
     console.log("=========================================================================");
 }
 
