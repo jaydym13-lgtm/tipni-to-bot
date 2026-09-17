@@ -3404,21 +3404,46 @@ async function synchronizujRozpisyVsechLig(isDeep = false) {
                 let batch = db.batch();
                 let batchOpCount = 0;
 
+                const claimedMatchIds = new Set();
+
                 for (const item of itemsToProcess) {
                     const rawDomaci = item.homeTeam?.name || "Neznámý";
                     const rawHoste = item.awayTeam?.name || "Neznámý";
                     const domaci = slovnikTymu[rawDomaci] || rawDomaci;
                     const hoste = slovnikTymu[rawHoste] || rawHoste;
+                    const itemRoundNum = item.roundInfo?.round ? parseInt(item.roundInfo.round, 10) : null;
+                    const itemMs = item.startTimestamp ? (item.startTimestamp * 1000) : 0;
 
-                    // 🛡️ OCHRANA EXISTUJÍCÍCH TIPŮ: Robustní párování přes slovník i otočené pořadatelství
+                    // 🛡️ OCHRANA EXISTUJÍCÍCH TIPŮ: Párujeme striktně podle shodného kola a týmů (žádné přepisování odvetami)
                     const existingEntry = Object.entries(RAM_CENTRAL_MATCHES[leagueName] || {}).find(([mId, z]) => {
+                        if (claimedMatchIds.has(mId)) return false;
+                        if (mId === String(item.id)) return true;
+
                         const zDomNorm = PL_NORM(slovnikTymu[z.domaci] || z.domaci);
                         const zHosNorm = PL_NORM(slovnikTymu[z.hoste] || z.hoste);
                         const curDomNorm = PL_NORM(domaci);
                         const curHosNorm = PL_NORM(hoste);
-                        return (zDomNorm === curDomNorm && zHosNorm === curHosNorm) || (zDomNorm === curHosNorm && zHosNorm === curDomNorm);
+
+                        // Domácí a hosté MUSÍ sedět přesně (žádné prohazování s odvetami)
+                        if (zDomNorm !== curDomNorm || zHosNorm !== curHosNorm) return false;
+
+                        // Kontrola shodného čísla kola (zabrání přepsání 3. kola např. 16. kolem)
+                        const zRoundNum = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""), 10);
+                        if (zRoundNum && itemRoundNum && zRoundNum === itemRoundNum) {
+                            return true;
+                        }
+
+                        // Pojistka na časovou blízkost (do 7 dnů) pro případ, že kolo nemá číslo (např. Play-off)
+                        const zMs = Date.parse(z.datum);
+                        if (zMs && itemMs && Math.abs(zMs - itemMs) < 7 * 24 * 60 * 60 * 1000) {
+                            return true;
+                        }
+
+                        return false;
                     });
+
                     const matchId = existingEntry ? existingEntry[0] : String(item.id);
+                    claimedMatchIds.add(matchId);
 
                     const roundNum = item.roundInfo?.round || 1;
                     const isPlayoff = Boolean(item.roundInfo?.name && item.roundInfo.name.toLowerCase().includes("playoff"));
