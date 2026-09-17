@@ -3428,6 +3428,110 @@ async function opravitVsechnyLigyKonsolidace() {
     console.log("🏁 GENERÁLNÍ OČISTA VŠECH LIG DOKONČENA.");
 }
 
+// 🔍 100% BEZPEČNÝ AUDIT ODEHRANÝCH ZÁPASŮ (ČISTÝ READ-ONLY, NULOVÝ ZÁPIS DO DB/R2, NULOVÝ ZÁSAH DO TIPŮ)
+async function auditOdehranychZapasu() {
+    console.log("=========================================================================");
+    console.log("🔍 RENTGEN AUDIT: Spouštím kontrolu odehraných zápasů napříč všemi ligami...");
+    console.log("=========================================================================");
+
+    const ligyKAuditu = ["Chance Liga", "Premier League", "Tipsport Extraliga", "Liga mistrů"];
+
+    for (const leagueName of ligyKAuditu) {
+        const cfg = SOFASCORE_TOURNAMENTS[leagueName];
+        if (!cfg) continue;
+
+        console.log(`\n--- 🔎 KONTROLA SOUTĚŽE: ${leagueName} ---`);
+
+        // Stáhneme oficiální odehrané zápasy (pouze pro čtení)
+        const apiLastEvents = await fetchSportApiTournamentEvents(leagueName, cfg, "last", true);
+        const centralZapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
+
+        let vPoradkuPocet = 0;
+        let otocenoTymyPocet = 0;
+        let nenalezenoVDB = 0;
+        const nalezyOtocenych = [];
+
+        for (const ev of apiLastEvents) {
+            if (!ev || !ev.homeTeam || !ev.awayTeam) continue;
+
+            const rawH = ev.homeTeam.name || "";
+            const rawA = ev.awayTeam.name || "";
+            const apiDom = slovnikTymu[rawH] || rawH;
+            const apiHos = slovnikTymu[rawA] || rawA;
+            const apiGolyDom = ev.homeScore?.current;
+            const apiGolyHos = ev.awayScore?.current;
+            const koloText = ev.roundInfo?.round ? `${ev.roundInfo.round}. kolo` : (ev.roundInfo?.name || "–");
+
+            const normApiD = PL_NORM(apiDom);
+            const normApiH = PL_NORM(apiHos);
+
+            // Hledáme zápas v naší paměti (přímý nebo otočený)
+            const dbEntry = Object.entries(centralZapasy).find(([mId, z]) => {
+                const zD = PL_NORM(slovnikTymu[z.domaci] || z.domaci);
+                const zH = PL_NORM(slovnikTymu[z.hoste] || z.hoste);
+                return (zD === normApiD && zH === normApiH) || (zD === normApiH && zH === normApiD);
+            });
+
+            if (!dbEntry) {
+                nenalezenoVDB++;
+                continue;
+            }
+
+            const [mId, dbZapas] = dbEntry;
+            const normDbD = PL_NORM(slovnikTymu[dbZapas.domaci] || dbZapas.domaci);
+            const normDbH = PL_NORM(slovnikTymu[dbZapas.hoste] || dbZapas.hoste);
+
+            const jePrimePoradatelstvi = (normDbD === normApiD && normDbH === normApiH);
+            const jeOtocenePoradatelstvi = (normDbD === normApiH && normDbH === normApiD);
+
+            if (jePrimePoradatelstvi) {
+                vPoradkuPocet++;
+            } else if (jeOtocenePoradatelstvi) {
+                otocenoTymyPocet++;
+
+                // Zjistíme, jak jsou v naší DB uložené góly vůči API
+                const dbGolyDom = dbZapas.vysledek_domaci;
+                const dbGolyHos = dbZapas.vysledek_hoste;
+
+                let stavSkore = "Neznámý";
+                if (dbGolyDom === apiGolyDom && dbGolyHos === apiGolyHos) {
+                    stavSkore = "⚠️ GÓLY ZŮSTALY PŮVODNÍ (nesedí k otočeným týmům v DB)";
+                } else if (dbGolyDom === apiGolyHos && dbGolyHos === apiGolyDom) {
+                    stavSkore = "🔄 GÓLY JSOU PŘETOČENÉ SPOLU S TÝMY";
+                } else {
+                    stavSkore = `Rozdíl skóre (DB: ${dbGolyDom}:${dbGolyHos} vs API: ${apiGolyDom}:${apiGolyHos})`;
+                }
+
+                nalezyOtocenych.push({
+                    kolo: koloText,
+                    id: mId,
+                    oficialneSofa: `${apiDom} vs ${apiHos} (${apiGolyDom}:${apiGolyHos})`,
+                    vNasiDatabaze: `${dbZapas.domaci} vs ${dbZapas.hoste} (${dbGolyDom}:${dbGolyHos})`,
+                    stavSkore: stavSkore
+                });
+            }
+        }
+
+        console.log(`📊 SOUHRN [${leagueName}]:`);
+        console.log(`   ✅ V pořádku: ${vPoradkuPocet} zápasů`);
+        console.log(`   🚨 OTOČENÉ TÝMY: ${otocenoTymyPocet} zápasů`);
+        console.log(`   ❓ V API existuje, ale v DB není: ${nenalezenoVDB} zápasů`);
+
+        if (nalezyOtocenych.length > 0) {
+            console.log(`   📋 SEZNAM ZÁPASŮ S OTOČENÝM POŘADATELSTVÍM:`);
+            nalezyOtocenych.forEach(n => {
+                console.log(`      • [${n.kolo}] ID:${n.id}`);
+                console.log(`        - REALITA (SofaScore): ${n.oficialneSofa}`);
+                console.log(`        - V NAŠÍ DATABÁZI:     ${n.vNasiDatabaze}`);
+                console.log(`        - STAV SKÓRE:          ${n.stavSkore}`);
+            });
+        }
+    }
+    console.log("\n=========================================================================");
+    console.log("🏁 RENTGEN AUDIT DOKONČEN. Žádná data nebyla změněna.");
+    console.log("=========================================================================");
+}
+
 // 📡 Pomocný stahovač zápasů z turnajového feedu SportAPI7 (podpora stránkování 0, 1, 2...)
 async function fetchSportApiTournamentEvents(leagueName, cfg, type = "next", isDeep = false) {
     if (!RAPIDAPI_KEY) return [];
@@ -3821,6 +3925,14 @@ async function startEnterpriseApplication() {
             synchronizujRozpisyVsechLig(isDeep).catch(err => console.error("❌ Chyba rozpisů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
             res.end(`OK - Synchronizace rozpisů zahájena (${isDeep ? "hloubková celá sezóna" : "běžná"}).`);
+            return;
+        }
+
+        if (url === "/audit-history" || url.startsWith("/audit-history")) {
+            console.log("🔍 SERVISNÍ PING: Spouštím bezpečný audit odehraných zápasů (100% READ-ONLY)...");
+            auditOdehranychZapasu().catch(err => console.error("❌ Chyba auditu:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Bezpečný audit odehraných zápasů zahájen. Sleduj logy na Renderu.");
             return;
         }
 
