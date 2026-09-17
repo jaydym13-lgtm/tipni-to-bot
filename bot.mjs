@@ -3633,7 +3633,7 @@ async function synchronizujRozpisyVsechLig(isDeep = false) {
                     const itemRoundNum = item.roundInfo?.round ? parseInt(item.roundInfo.round, 10) : null;
                     const itemMs = item.startTimestamp ? (item.startTimestamp * 1000) : 0;
 
-                    // 🛡️ OCHRANA EXISTUJÍCÍCH TIPŮ: Párujeme striktně podle shodného kola a týmů (žádné přepisování odvetami)
+                    // 🛡️ OCHRANA EXISTUJÍCÍCH TIPŮ: Párujeme podle týmů a kola (povolujeme swap ledu V RÁMCI STEJNÉHO KOLA)
                     const existingEntry = Object.entries(RAM_CENTRAL_MATCHES[leagueName] || {}).find(([mId, z]) => {
                         if (claimedMatchIds.has(mId)) return false;
                         if (mId === String(item.id)) return true;
@@ -3643,16 +3643,25 @@ async function synchronizujRozpisyVsechLig(isDeep = false) {
                         const curDomNorm = PL_NORM(domaci);
                         const curHosNorm = PL_NORM(hoste);
 
-                        // Domácí a hosté MUSÍ sedět přesně (žádné prohazování s odvetami)
-                        if (zDomNorm !== curDomNorm || zHosNorm !== curHosNorm) return false;
+                        const jeShodaTymu = (zDomNorm === curDomNorm && zHosNorm === curHosNorm);
+                        const jeSwapTymu = (zDomNorm === curHosNorm && zHosNorm === curDomNorm);
 
-                        // Kontrola shodného čísla kola (zabrání přepsání 3. kola např. 16. kolem)
+                        if (!jeShodaTymu && !jeSwapTymu) return false;
+
                         const zRoundNum = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""), 10);
+
+                        // 🏒 VÝMĚNA POŘADATELSTVÍ (SWAP): Povolena VÝHRADNĚ při 100% shodě čísla kola (např. 3. kolo za 3. kolo)
+                        // Umožní převzít oficiální výměnu ledu a zabrání vytvoření odloženého duplikátu, ale nedovolí odvetám z jara přepsat podzim!
+                        if (jeSwapTymu) {
+                            return Boolean(zRoundNum && itemRoundNum && zRoundNum === itemRoundNum);
+                        }
+
+                        // Běžná shoda přímého pořadatelství ve stejném kole
                         if (zRoundNum && itemRoundNum && zRoundNum === itemRoundNum) {
                             return true;
                         }
 
-                        // Pojistka na časovou blízkost (do 7 dnů) pro případ, že kolo nemá číslo (např. Play-off)
+                        // Pojistka na časovou blízkost (do 7 dnů) pro kola bez čísla (např. Play-off)
                         const zMs = Date.parse(z.datum);
                         if (zMs && itemMs && Math.abs(zMs - itemMs) < 7 * 24 * 60 * 60 * 1000) {
                             return true;
