@@ -3711,11 +3711,7 @@ async function synchronizujRozpisyVsechLig(isDeep = false) {
 
                     const stary = RAM_CENTRAL_MATCHES[leagueName]?.[matchId] || {};
 
-                    const statusObj = item.status || {};
-                    const statusType = String(statusObj.type || "").toLowerCase();
-                    const statusDesc = String(statusObj.description || "").toUpperCase();
-
-                    const isPostponed = ["POSTPONED", "PST", "CANCELLED", "SUSPENDED", "ABANDONED"].includes(statusDesc) || statusType === "canceled" || statusType === "postponed";
+                    const isPostponed = itemJeOdlozen;
                     const isFinishedApi = statusType === "finished" || ["FT", "AOT", "AP", "ENDED"].includes(statusDesc);
                     const hasScoreApi = item.homeScore?.current !== undefined && item.homeScore?.current !== null && item.awayScore?.current !== undefined && item.awayScore?.current !== null;
 
