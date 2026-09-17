@@ -3314,42 +3314,57 @@ async function providniApiHeartbeat() {
     }
 }
 
-// 📡 Pomocný stahovač odehraných i nadcházejících zápasů z turnajového feedu SportAPI7
-async function fetchSportApiTournamentEvents(leagueName, cfg, type = "next") {
+// 📡 Pomocný stahovač zápasů z turnajového feedu SportAPI7 (podpora stránkování 0, 1, 2...)
+async function fetchSportApiTournamentEvents(leagueName, cfg, type = "next", isDeep = false) {
     if (!RAPIDAPI_KEY) return [];
     const prefix = cfg.isUnique ? "unique-tournament" : "tournament";
-    const url = `https://sportapi7.p.rapidapi.com/api/v1/${prefix}/${cfg.id}/season/${cfg.seasonId}/events/${type}/0`;
-    try {
-        const res = await fetch(url, {
-            headers: {
-                "x-rapidapi-key": RAPIDAPI_KEY,
-                "x-rapidapi-host": "sportapi7.p.rapidapi.com"
-            },
-            signal: AbortSignal.timeout(9000)
-        });
+    const allEvents = [];
+    let page = 0;
+    let hasMore = true;
 
-        const remaining = res.headers.get("x-ratelimit-requests-remaining");
-        if (remaining !== null) {
-            console.log(`📊 SPORTAPI7 [Kalendář ${leagueName} (${type})]: Zbývá ${remaining} requestů do limitu.`);
+    while (hasMore) {
+        const url = `https://sportapi7.p.rapidapi.com/api/v1/${prefix}/${cfg.id}/season/${cfg.seasonId}/events/${type}/${page}`;
+        try {
+            const res = await fetch(url, {
+                headers: {
+                    "x-rapidapi-key": RAPIDAPI_KEY,
+                    "x-rapidapi-host": "sportapi7.p.rapidapi.com"
+                },
+                signal: AbortSignal.timeout(9000)
+            });
+
+            const remaining = res.headers.get("x-ratelimit-requests-remaining");
+            if (remaining !== null) {
+                console.log(`📊 SPORTAPI7 [Kalendář ${leagueName} (${type}, str. ${page})]: Zbývá ${remaining} requestů do limitu.`);
+            }
+
+            if (!res.ok) {
+                console.warn(`⚠️ KALENDÁŘ [${leagueName} - ${type} str. ${page}]: API status ${res.status}`);
+                break;
+            }
+
+            const data = await res.json();
+            const events = data.events || [];
+            allEvents.push(...events);
+
+            // Pokud neběží hloubkový audit (běžný den) NEBO stránka vrátila méně než 30 zápasů (konec sezóny), končíme
+            if (!isDeep || events.length < 30) {
+                hasMore = false;
+            } else {
+                page++;
+            }
+        } catch (err) {
+            console.error(`❌ KALENDÁŘ [${leagueName} - ${type} str. ${page}]: Selhal dotaz:`, err.message);
+            break;
         }
-
-        if (!res.ok) {
-            console.warn(`⚠️ KALENDÁŘ [${leagueName} - ${type}]: API status ${res.status}`);
-            return [];
-        }
-
-        const data = await res.json();
-        return data.events || [];
-    } catch (err) {
-        console.error(`❌ KALENDÁŘ [${leagueName} - ${type}]: Selhal dotaz:`, err.message);
-        return [];
     }
+    return allEvents;
 }
 
-// 📅 HLOUBKOVÝ KALENDÁŘ: Synchronizuje rozpis zápasů všech lig přes SportAPI7
-async function synchronizujRozpisyVsechLig() {
+// 📅 KALENDÁŘ: Synchronizuje rozpis zápasů všech lig přes SportAPI7 (běžný vs. hloubkový audit)
+async function synchronizujRozpisyVsechLig(isDeep = false) {
     console.log("=========================================================================");
-    console.log("📅 SERVISNÍ KALENDÁŘ: Spouštím synchronizaci rozpisů přes SportAPI7...");
+    console.log(`📅 SERVISNÍ KALENDÁŘ: Spouštím synchronizaci rozpisů přes SportAPI7 (${isDeep ? "HLOUBKOVÝ AUDIT CELÉ SEZÓNY" : "BĚŽNÁ DENNÍ KONTROLA STR. 0"})...`);
     console.log("=========================================================================");
 
     if (!RAPIDAPI_KEY) {
@@ -3370,9 +3385,9 @@ async function synchronizujRozpisyVsechLig() {
             try {
                 let ligaZmenena = false;
 
-                // 🚀 Stahujeme VÝHRADNĚ nadcházející zápasy (žádné 'last', nulové plýtvání limitem)
-                const nextEvents = await fetchSportApiTournamentEvents(leagueName, cfg, "next");
-                console.log(`🔎 KALENDÁŘ [${leagueName}]: Načteno ${nextEvents.length} nadcházejících zápasů.`);
+                // Stahujeme nadcházející zápasy: při běžné kontrole 1 stránku (30 zápasů), při deep=true všechny stránky do konce sezóny
+                const nextEvents = await fetchSportApiTournamentEvents(leagueName, cfg, "next", isDeep);
+                console.log(`🔎 KALENDÁŘ [${leagueName}]: Načteno celkem ${nextEvents.length} nadcházejících zápasů.`);
 
                 // Filtrujeme příchozí zápasy pro LM: Pouze ligová fáze (od září 2026) a jarní Play-off 2027
                 let itemsToProcess = nextEvents;
@@ -3652,10 +3667,11 @@ async function startEnterpriseApplication() {
         }
 
         if (url === "/sync-fixtures" || url.startsWith("/sync-fixtures")) {
-            console.log(`📅 SERVISNÍ PING (/sync-fixtures): Spouštím kontrolu kalendářů...`);
-            synchronizujRozpisyVsechLig().catch(err => console.error("❌ Chyba rozpisů:", err));
+            const isDeep = url.includes("deep=true");
+            console.log(`📅 SERVISNÍ PING (/sync-fixtures, deep=${isDeep}): Spouštím kontrolu kalendářů...`);
+            synchronizujRozpisyVsechLig(isDeep).catch(err => console.error("❌ Chyba rozpisů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Synchronizace rozpisů zahájena.");
+            res.end(`OK - Synchronizace rozpisů zahájena (${isDeep ? "hloubková celá sezóna" : "běžná"}).`);
             return;
         }
 
