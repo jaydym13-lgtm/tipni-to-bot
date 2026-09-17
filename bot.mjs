@@ -3630,18 +3630,51 @@ async function synchronizujRozpisyVsechLig(isDeep = false) {
                     const rawHoste = item.awayTeam?.name || "Neznámý";
                     const domaci = slovnikTymu[rawDomaci] || rawDomaci;
                     const hoste = slovnikTymu[rawHoste] || rawHoste;
-                    const itemRoundNum = item.roundInfo?.round ? parseInt(item.roundInfo.round, 10) : null;
+                    const rawRound = item.roundInfo?.round || item.roundInfo?.name || "";
+                    const itemRoundNum = parseInt(String(rawRound).replace(/[^0-9]/g, ""), 10) || null;
                     const itemMs = item.startTimestamp ? (item.startTimestamp * 1000) : 0;
 
-                    // 🛡️ OCHRANA EXISTUJÍCÍCH TIPŮ: Párujeme podle týmů a kola (povolujeme swap ledu V RÁMCI STEJNÉHO KOLA)
+                    const statusObj = item.status || {};
+                    const statusDesc = String(statusObj.description || "").toUpperCase();
+                    const statusType = String(statusObj.type || "").toLowerCase();
+                    const itemJeOdlozen = ["POSTPONED", "PST", "CANCELLED", "SUSPENDED", "ABANDONED"].includes(statusDesc) || statusType === "canceled" || statusType === "postponed";
+
+                    const curDomNorm = PL_NORM(domaci);
+                    const curHosNorm = PL_NORM(hoste);
+
+                    // 🛡️ FILTR ODLOŽENÝCH DUPLIKÁTŮ (SWAPŮ):
+                    // Pokud API posílá odložený zápas, ale v tomtéž kole existuje platný rozehraný/naplánovaný zápas těchto týmů, odložený ignorujeme a smažeme!
+                    if (itemJeOdlozen) {
+                        const existujeAktivniZapas = Object.entries(RAM_CENTRAL_MATCHES[leagueName] || {}).some(([mId, z]) => {
+                            if (mId === String(item.id)) return false;
+                            const zD = PL_NORM(slovnikTymu[z.domaci] || z.domaci);
+                            const zH = PL_NORM(slovnikTymu[z.hoste] || z.hoste);
+                            const stejneTymy = (zD === curDomNorm && zH === curHosNorm) || (zD === curHosNorm && zH === curDomNorm);
+                            const zRound = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""), 10) || null;
+                            const stejneKolo = (zRound && itemRoundNum && zRound === itemRoundNum);
+                            const jeAktivni = z.apiStatus !== "POSTPONED";
+                            return stejneTymy && stejneKolo && jeAktivni;
+                        });
+
+                        if (existujeAktivniZapas) {
+                            console.log(`🛡️ KALENDÁŘ [${leagueName}]: Ignoruji odložený duplikát ${domaci} vs ${hoste} (${item.id}), protože v kole již existuje platný zápas.`);
+                            // Pokud tento odložený zápas ještě straší v DB, rovnou ho smažeme
+                            if (RAM_CENTRAL_MATCHES[leagueName]?.[String(item.id)]) {
+                                delete RAM_CENTRAL_MATCHES[leagueName][String(item.id)];
+                                db.collection("ligy").doc(leagueName).collection("sezony").doc(SEZONA_ID).collection("zapasy").doc(String(item.id)).delete().catch(() => {});
+                                ligaZmenena = true;
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 🛡️ PÁROVÁNÍ ZÁPASŮ:
                     const existingEntry = Object.entries(RAM_CENTRAL_MATCHES[leagueName] || {}).find(([mId, z]) => {
                         if (claimedMatchIds.has(mId)) return false;
                         if (mId === String(item.id)) return true;
 
                         const zDomNorm = PL_NORM(slovnikTymu[z.domaci] || z.domaci);
                         const zHosNorm = PL_NORM(slovnikTymu[z.hoste] || z.hoste);
-                        const curDomNorm = PL_NORM(domaci);
-                        const curHosNorm = PL_NORM(hoste);
 
                         const jeShodaTymu = (zDomNorm === curDomNorm && zHosNorm === curHosNorm);
                         const jeSwapTymu = (zDomNorm === curHosNorm && zHosNorm === curDomNorm);
@@ -3649,25 +3682,11 @@ async function synchronizujRozpisyVsechLig(isDeep = false) {
                         if (!jeShodaTymu && !jeSwapTymu) return false;
 
                         const zRoundNum = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""), 10);
-
-                        // 🏒 VÝMĚNA POŘADATELSTVÍ (SWAP): Povolena VÝHRADNĚ při 100% shodě čísla kola (např. 3. kolo za 3. kolo)
-                        // Umožní převzít oficiální výměnu ledu a zabrání vytvoření odloženého duplikátu, ale nedovolí odvetám z jara přepsat podzim!
-                        if (jeSwapTymu) {
-                            return Boolean(zRoundNum && itemRoundNum && zRoundNum === itemRoundNum);
-                        }
-
-                        // Běžná shoda přímého pořadatelství ve stejném kole
-                        if (zRoundNum && itemRoundNum && zRoundNum === itemRoundNum) {
-                            return true;
-                        }
-
-                        // Pojistka na časovou blízkost (do 7 dnů) pro kola bez čísla (např. Play-off)
                         const zMs = Date.parse(z.datum);
-                        if (zMs && itemMs && Math.abs(zMs - itemMs) < 7 * 24 * 60 * 60 * 1000) {
-                            return true;
-                        }
+                        const isSameRound = Boolean(zRoundNum && itemRoundNum && zRoundNum === itemRoundNum);
+                        const isCloseDate = Boolean(zMs && itemMs && Math.abs(zMs - itemMs) < 5 * 24 * 60 * 60 * 1000);
 
-                        return false;
+                        return isSameRound || isCloseDate;
                     });
 
                     const matchId = existingEntry ? existingEntry[0] : String(item.id);
