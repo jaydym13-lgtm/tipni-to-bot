@@ -3244,36 +3244,108 @@ async function providniApiHeartbeat() {
             const isHockey = leagueName.includes("hokej") || leagueName.includes("Extraliga");
             const livePool = isHockey ? liveHockeyEvents : liveFootballEvents;
 
-            if (!livePool || livePool.length === 0) continue;
+            const poolHasEvents = Array.isArray(livePool) && livePool.length > 0;
+                const maNeukoncenyLiveZapas = Object.values(centralZapasy).some(z => z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED");
 
-            for (const [matchId, stary] of Object.entries(centralZapasy)) {
-                if (stary.apiStatus === "FINISHED") continue;
+                // Pokud v live feedu nic není a zároveň nemáme v této lize rozehraný zápas, přeskočíme
+                if (!poolHasEvents && !maNeukoncenyLiveZapas) continue;
 
-                const liveItem = najdiLiveZapasVeFeedu(stary, livePool);
-                if (!liveItem) {
-                    // 🧹 AUTOMATICKÝ ÚKLID DUCHŮ: Pokud zápas v DB svítí jako IN_PLAY, ale v API neběží a má výkop v budoucnu (> 12 h), vrátíme ho do SCHEDULED!
-                    const matchStartMs = Date.parse(stary.datum || "");
-                    const isFutureMatch = !isNaN(matchStartMs) && (matchStartMs - nyniMs > 12 * 60 * 60 * 1000);
-                    if (stary.apiStatus === "IN_PLAY" && isFutureMatch) {
-                        console.log(`🧹 ČISTÍM FALEŠNÝ LIVE ZÁPAS [${leagueName}]: ${stary.domaci} vs ${stary.hoste} (${stary.kolo}) vracím do SCHEDULED.`);
-                        stary.apiStatus = "SCHEDULED";
-                        delete stary.vysledek_domaci;
-                        delete stary.vysledek_hoste;
-                        delete stary.postup;
-                        zmeneneLigySet.add(leagueName);
+                let lastEventsCache = null; // Stáhne /events/last/0 maximálně 1× pro celou ligu v tomto cyklu
 
-                        db.collection("ligy").doc(leagueName)
-                          .collection("sezony").doc(SEZONA_ID)
-                          .collection("zapasy").doc(matchId)
-                          .update({
-                              apiStatus: "SCHEDULED",
-                              vysledek_domaci: admin.firestore.FieldValue.delete(),
-                              vysledek_hoste: admin.firestore.FieldValue.delete(),
-                              postup: admin.firestore.FieldValue.delete()
-                          }).catch(() => {});
+                for (const [matchId, stary] of Object.entries(centralZapasy)) {
+                    if (stary.apiStatus === "FINISHED") continue;
+
+                    const liveItem = poolHasEvents ? najdiLiveZapasVeFeedu(stary, livePool) : null;
+                    if (!liveItem) {
+                        // 🔍 VARIANTA B: Zápas byl IN_PLAY, ale v live feedu už není -> ověříme skončené zápasy ligy
+                        if (stary.apiStatus === "IN_PLAY" || stary.apiStatus === "PAUSED") {
+                            const cfg = SOFASCORE_TOURNAMENTS[leagueName];
+                            if (cfg) {
+                                if (lastEventsCache === null) {
+                                    try {
+                                        console.log(`🔎 POHOTOVOST [${leagueName}]: Zápas zmizel z live feedu. Stahuji čerstvě dohrané zápasy ligy (/events/last/0)...`);
+                                        lastEventsCache = await fetchSportApiTournamentEvents(leagueName, cfg, "last", false);
+                                    } catch (err) {
+                                        console.error(`❌ Selhalo stažení ukončených zápasů pro ${leagueName}:`, err.message);
+                                        lastEventsCache = [];
+                                    }
+                                }
+
+                                const finishedEvent = najdiLiveZapasVeFeedu(stary, lastEventsCache);
+                                if (finishedEvent) {
+                                    const statusObj = finishedEvent.status || {};
+                                    const statusType = String(statusObj.type || "").toLowerCase();
+                                    const statusDesc = String(statusObj.description || "").toUpperCase();
+                                    const isFinished = statusType === "finished" || ["FT", "AOT", "AP", "ENDED"].includes(statusDesc);
+
+                                    if (isFinished) {
+                                        const rawH = finishedEvent.homeTeam?.name || "";
+                                        const normH = PL_NORM(slovnikTymu[rawH] || rawH);
+                                        const nasDom = PL_NORM(stary.domaci);
+                                        const isInverted = !(normH === nasDom || normH.includes(nasDom) || nasDom.includes(normH));
+
+                                        const hScore = isInverted ? finishedEvent.awayScore : finishedEvent.homeScore;
+                                        const aScore = isInverted ? finishedEvent.homeScore : finishedEvent.awayScore;
+
+                                        let gDom = hScore?.current ?? stary.vysledek_domaci ?? 0;
+                                        let gHos = aScore?.current ?? stary.vysledek_hoste ?? 0;
+                                        let novyPostup = "";
+
+                                        if (isHockey) {
+                                            const p1D = hScore?.period1 || 0; const p2D = hScore?.period2 || 0; const p3D = hScore?.period3 || 0;
+                                            const p1H = aScore?.period1 || 0; const p2H = aScore?.period2 || 0; const p3H = aScore?.period3 || 0;
+                                            const regDom = p1D + p2D + p3D;
+                                            const regHos = p1H + p2H + p3H;
+
+                                            if (regDom === regHos && (hScore?.current !== aScore?.current || hScore?.overtime !== undefined || hScore?.penalties !== undefined)) {
+                                                gDom = regDom;
+                                                gHos = regHos;
+                                                novyPostup = (hScore.current > aScore.current) ? "domaci" : "hoste";
+                                            }
+                                        }
+
+                                        console.log(`✅ ZÁPAS DOHRÁN [${leagueName}]: ${stary.domaci} ${gDom}:${gHos} ${stary.hoste} (FINISHED)`);
+                                        stary.apiStatus = "FINISHED";
+                                        stary.vysledek_domaci = gDom;
+                                        stary.vysledek_hoste = gHos;
+                                        stary.postup = novyPostup;
+                                        zmeneneLigySet.add(leagueName);
+
+                                        db.collection("ligy").doc(leagueName)
+                                            .collection("sezony").doc(SEZONA_ID)
+                                            .collection("zapasy").doc(matchId)
+                                            .set({ apiStatus: "FINISHED", vysledek_domaci: gDom, vysledek_hoste: gHos, postup: novyPostup }, { merge: true })
+                                            .catch(e => console.error(`❌ Firestore Sync Error:`, e.message));
+
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 🧹 AUTOMATICKÝ ÚKLID DUCHŮ: Pokud zápas v DB svítí jako IN_PLAY, ale v API neběží a má výkop v budoucnu (> 12 h), vrátíme ho do SCHEDULED!
+                        const matchStartMs = Date.parse(stary.datum || "");
+                        const isFutureMatch = !isNaN(matchStartMs) && (matchStartMs - nyniMs > 12 * 60 * 60 * 1000);
+                        if (stary.apiStatus === "IN_PLAY" && isFutureMatch) {
+                            console.log(`🧹 ČISTÍM FALEŠNÝ LIVE ZÁPAS [${leagueName}]: ${stary.domaci} vs ${stary.hoste} (${stary.kolo}) vracím do SCHEDULED.`);
+                            stary.apiStatus = "SCHEDULED";
+                            delete stary.vysledek_domaci;
+                            delete stary.vysledek_hoste;
+                            delete stary.postup;
+                            zmeneneLigySet.add(leagueName);
+
+                            db.collection("ligy").doc(leagueName)
+                              .collection("sezony").doc(SEZONA_ID)
+                              .collection("zapasy").doc(matchId)
+                              .update({
+                                  apiStatus: "SCHEDULED",
+                                  vysledek_domaci: admin.firestore.FieldValue.delete(),
+                                  vysledek_hoste: admin.firestore.FieldValue.delete(),
+                                  postup: admin.firestore.FieldValue.delete()
+                              }).catch(() => {});
+                        }
+                        continue;
                     }
-                    continue;
-                }
 
                 const statusObj = liveItem.status || {};
                 const statusType = String(statusObj.type || "").toLowerCase();
