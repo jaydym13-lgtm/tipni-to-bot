@@ -3763,8 +3763,22 @@ async function synchronizujRozpisyVsechLig(isDeep = false) {
                         console.log(`🛡️ KALENDÁŘ [${leagueName}]: Synchronizován výsledek pro ${domaci} ${gDom}:${gHos} ${hoste} (FINISHED)`);
                     } else if (isPostponed) {
                         matchPayload.apiStatus = "POSTPONED";
-                    } else if (stary.apiStatus === "POSTPONED" && !isPostponed) {
-                        matchPayload.apiStatus = "SCHEDULED";
+                        if (stary.manuallyPostponed) matchPayload.manuallyPostponed = true;
+                    } else if (stary.manuallyPostponed || stary.apiStatus === "POSTPONED") {
+                        // 🛡️ CHYTRÝ ZÁMEK: Zkontrolujeme, zda API přineslo prokazatelně nový termín nebo prohozené týmy
+                        const staryMs = Date.parse(stary.datum || "");
+                        const novyMs = item.startTimestamp ? (item.startTimestamp * 1000) : Date.parse(matchPayload.datum || "");
+                        const jeNovyTermin = !isNaN(staryMs) && !isNaN(novyMs) && Math.abs(staryMs - novyMs) > 60 * 60 * 1000;
+                        const jeSwapTymu = (PL_NORM(stary.domaci) === curHosNorm && PL_NORM(stary.hoste) === curDomNorm);
+
+                        if (stary.manuallyPostponed && !jeNovyTermin && !jeSwapTymu) {
+                            matchPayload.apiStatus = "POSTPONED";
+                            matchPayload.manuallyPostponed = true;
+                            matchPayload.datum = stary.datum; // Zachováme stávající termín
+                        } else {
+                            matchPayload.apiStatus = isPostponed ? "POSTPONED" : "SCHEDULED";
+                            matchPayload.manuallyPostponed = false;
+                        }
                     }
 
                     if (stary.isTopMatch) matchPayload.isTopMatch = true;
