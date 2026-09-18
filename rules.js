@@ -209,27 +209,23 @@ export const vypocitejBodyZapasu = (tipDomaci, tipHoste, resDomaci, resHoste, le
     return body;
 };
 
-export const formatujZobrazeneSkore = (gDomaci, gHoste, postup, leagueName, isPlayoff, zarovnat = true) => {
-    const jeExtraliga = leagueName === "Tipsport Extraliga";
-    const jePlayoffFotbal = Boolean(isPlayoff && leagueName !== "Liga mistrů");
-    const maProdlouzeni = jeExtraliga || jePlayoffFotbal;
-    const spacer = (maProdlouzeni && zarovnat) ? '<span style="visibility:hidden;user-select:none;">p</span>' : '';
-
+export const formatujZobrazeneSkore = (gDomaci, gHoste, postup, leagueName, isPlayoff) => {
     if (gDomaci === undefined || gHoste === undefined || gDomaci === null || gHoste === null || gDomaci === '' || gHoste === '') {
-        return `?:?${spacer}`;
+        return '?:?';
     }
     const d = parseInt(gDomaci, 10);
     const h = parseInt(gHoste, 10);
-    if (isNaN(d) || isNaN(h)) return `${gDomaci}:${gHoste}${spacer}`;
+    if (isNaN(d) || isNaN(h)) return `${gDomaci}:${gHoste}`;
 
-    if (maProdlouzeni && d === h && postup) {
-        if (postup === 'domaci') {
-            return `${d + 1}:${h}p`;
-        } else if (postup === 'hoste') {
-            return `${d}:${h + 1}p`;
-        }
+    const jeExtraliga = leagueName === "Tipsport Extraliga";
+    const jePlayoffFotbal = Boolean(isPlayoff && leagueName !== "Liga mistrů");
+
+    if ((jeExtraliga || jePlayoffFotbal) && d === h && postup) {
+        const finalD = postup === 'domaci' ? d + 1 : d;
+        const finalH = postup === 'hoste' ? h + 1 : h;
+        return `<span class="score-container">${finalD}:${finalH}<span class="score-p">p</span></span>`;
     }
-    return `${d}:${h}${spacer}`;
+    return `${d}:${h}`;
 };
 
 if (typeof window !== 'undefined') {
