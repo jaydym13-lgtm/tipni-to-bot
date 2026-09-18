@@ -3134,22 +3134,29 @@ async function fetchSportApiLive(sport) {
     }
 }
 
-// 🔍 Robustní párovací asistent týmů z live SofaScore feedu
+// 🔍 Robustní párovací asistent týmů z live SofaScore feedu (S PŘÍSNÝM ČASOVÝM ZÁMKEM A BEZ OBRACENÍ POŘADATELSTVÍ)
 function najdiLiveZapasVeFeedu(staryZapas, liveEventsList) {
     const nasDom = PL_NORM(staryZapas.domaci);
     const nasHos = PL_NORM(staryZapas.hoste);
+    const nasDatumMs = Date.parse(staryZapas.datum || "");
 
     return liveEventsList.find(ev => {
+        // 1. ČASOVÝ MANTINEL: Zápas v naší DB a zápas v API se musí hrát ve stejném okně (tolerance max 14 hodin)
+        if (ev.startTimestamp && !isNaN(nasDatumMs)) {
+            const apiDatumMs = ev.startTimestamp * 1000;
+            const rozdilHodin = Math.abs(apiDatumMs - nasDatumMs) / (1000 * 60 * 60);
+            if (rozdilHodin > 14) return false;
+        }
+
         const rawH = ev.homeTeam?.name || "";
         const rawA = ev.awayTeam?.name || "";
         const normH = PL_NORM(slovnikTymu[rawH] || rawH);
         const normA = PL_NORM(slovnikTymu[rawA] || rawA);
 
+        // 2. PŘÍSNÉ POŘADATELSTVÍ: Domácí musí být domácí a hosté hosté (žádné prohazování inverted!)
         const direct = (normH === nasDom || normH.includes(nasDom) || nasDom.includes(normH)) &&
                        (normA === nasHos || normA.includes(nasHos) || nasHos.includes(normA));
-        const inverted = (normH === nasHos || normH.includes(nasHos) || nasHos.includes(normH)) &&
-                         (normA === nasDom || normA.includes(nasDom) || nasDom.includes(normA));
-        return direct || inverted;
+        return direct;
     });
 }
 
@@ -3243,7 +3250,30 @@ async function providniApiHeartbeat() {
                 if (stary.apiStatus === "FINISHED") continue;
 
                 const liveItem = najdiLiveZapasVeFeedu(stary, livePool);
-                if (!liveItem) continue;
+                if (!liveItem) {
+                    // 🧹 AUTOMATICKÝ ÚKLID DUCHŮ: Pokud zápas v DB svítí jako IN_PLAY, ale v API neběží a má výkop v budoucnu (> 12 h), vrátíme ho do SCHEDULED!
+                    const matchStartMs = Date.parse(stary.datum || "");
+                    const isFutureMatch = !isNaN(matchStartMs) && (matchStartMs - nyniMs > 12 * 60 * 60 * 1000);
+                    if (stary.apiStatus === "IN_PLAY" && isFutureMatch) {
+                        console.log(`🧹 ČISTÍM FALEŠNÝ LIVE ZÁPAS [${leagueName}]: ${stary.domaci} vs ${stary.hoste} (${stary.kolo}) vracím do SCHEDULED.`);
+                        stary.apiStatus = "SCHEDULED";
+                        delete stary.vysledek_domaci;
+                        delete stary.vysledek_hoste;
+                        delete stary.postup;
+                        zmeneneLigySet.add(leagueName);
+
+                        db.collection("ligy").doc(leagueName)
+                          .collection("sezony").doc(SEZONA_ID)
+                          .collection("zapasy").doc(matchId)
+                          .update({
+                              apiStatus: "SCHEDULED",
+                              vysledek_domaci: admin.firestore.FieldValue.delete(),
+                              vysledek_hoste: admin.firestore.FieldValue.delete(),
+                              postup: admin.firestore.FieldValue.delete()
+                          }).catch(() => {});
+                    }
+                    continue;
+                }
 
                 const statusObj = liveItem.status || {};
                 const statusType = String(statusObj.type || "").toLowerCase();
