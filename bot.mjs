@@ -1772,7 +1772,14 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         const rHos = parseInt(zapas.vysledek_hoste);
         if (isNaN(rDom) || isNaN(rHos)) return;
 
-        const vysledekStr = `${rDom} : ${rHos}`;
+        const isHockey = leagueName.includes("hokej") || leagueName.includes("Extraliga");
+
+        let vysledekStr = `${rDom} : ${rHos}`;
+        if (isHockey && rDom === rHos) {
+            if (zapas.postup === 'domaci') vysledekStr = `${rDom + 1} : ${rHos}p`;
+            else if (zapas.postup === 'hoste') vysledekStr = `${rDom} : ${rHos + 1}p`;
+            else vysledekStr = `${rDom} : ${rHos}p`;
+        }
         cetnostVysledku[vysledekStr] = (cetnostVysledku[vysledekStr] || 0) + 1;
 
         let celkemBoduZapasu = 0;
@@ -1805,7 +1812,12 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             tipovaloLidi++;
             celkemTipuSez++;
 
-            const tipStr = `${tDom} : ${tHos}`;
+            let tipStr = `${tDom} : ${tHos}`;
+            if (isHockey && tDom === tHos) {
+                if (uTip.postup === 'domaci') tipStr = `${tDom + 1} : ${tHos}p`;
+                else if (uTip.postup === 'hoste') tipStr = `${tDom} : ${tHos + 1}p`;
+                else tipStr = `${tDom} : ${tHos}p`;
+            }
             cetnostTipu[tipStr] = (cetnostTipu[tipStr] || 0) + 1;
 
             const body = vypocitejBodyZapasuLocal(tDom, tHos, rDom, rHos, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
@@ -1813,8 +1825,15 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             klubyStats[dNazev].celkemTipu++;
             klubyStats[hNazev].celkemTipu++;
 
-            const jePresny = (tDom === rDom && tHos === rHos && (!zapas.isPlayoff || rDom !== rHos || uTip.postup === zapas.postup));
-            const jeTendence = (tDom > tHos && rDom > rHos) || (tDom < tHos && rDom < rHos) || (tDom === tHos && rDom === rHos);
+            const vyzadujePostup = isHockey || zapas.isPlayoff;
+            const jePresny = (tDom === rDom && tHos === rHos && (!vyzadujePostup || rDom !== rHos || uTip.postup === zapas.postup));
+
+            let jeTendence = false;
+            if (isHockey && rDom === rHos) {
+                jeTendence = (tDom === tHos && Boolean(uTip.postup) && uTip.postup === zapas.postup);
+            } else {
+                jeTendence = (tDom > tHos && rDom > rHos) || (tDom < tHos && rDom < rHos) || (tDom === tHos && rDom === rHos);
+            }
 
             if (jePresny) celkemPresnychTref++;
             if (jeTendence) celkemSpravnychTendenci++;
@@ -3297,10 +3316,19 @@ async function providniApiHeartbeat() {
                                             const regDom = p1D + p2D + p3D;
                                             const regHos = p1H + p2H + p3H;
 
-                                            if (regDom === regHos && (hScore?.current !== aScore?.current || hScore?.overtime !== undefined || hScore?.penalties !== undefined)) {
+                                            if (regDom === regHos && (hScore?.current !== aScore?.current || hScore?.overtime !== undefined || hScore?.penalties !== undefined || finishedEvent.winnerCode)) {
                                                 gDom = regDom;
                                                 gHos = regHos;
-                                                novyPostup = (hScore.current > aScore.current) ? "domaci" : "hoste";
+                                                const wCode = finishedEvent.winnerCode;
+                                                if (wCode === 1) novyPostup = isInverted ? "hoste" : "domaci";
+                                                else if (wCode === 2) novyPostup = isInverted ? "domaci" : "hoste";
+                                                else {
+                                                    const pD = hScore?.penalties ?? 0; const pH = aScore?.penalties ?? 0;
+                                                    const otD = hScore?.overtime ?? 0; const otH = aScore?.overtime ?? 0;
+                                                    const cD = hScore?.current ?? 0; const cH = aScore?.current ?? 0;
+                                                    if (cD > cH || otD > otH || pD > pH) novyPostup = "domaci";
+                                                    else if (cH > cD || otH > otD || pH > pD) novyPostup = "hoste";
+                                                }
                                             }
                                         }
 
@@ -3373,10 +3401,19 @@ async function providniApiHeartbeat() {
                         const regHos = p1H + p2H + p3H;
 
                         // Hokejová remíza v 60 min: Zaznamenáme stav 60 minut a z finálního skóre vyhodnotíme vítěze OT/SO
-                        if (regDom === regHos && (hScore.current !== aScore.current || hScore.overtime !== undefined || hScore.penalties !== undefined)) {
+                        if (regDom === regHos && (hScore.current !== aScore.current || hScore.overtime !== undefined || hScore.penalties !== undefined || liveItem.winnerCode)) {
                             golyDomaci = regDom;
                             golyHoste = regHos;
-                            novyPostup = (hScore.current > aScore.current) ? "domaci" : "hoste";
+                            const wCode = liveItem.winnerCode;
+                            if (wCode === 1) novyPostup = isInverted ? "hoste" : "domaci";
+                            else if (wCode === 2) novyPostup = isInverted ? "domaci" : "hoste";
+                            else {
+                                const pD = hScore?.penalties ?? 0; const pH = aScore?.penalties ?? 0;
+                                const otD = hScore?.overtime ?? 0; const otH = aScore?.overtime ?? 0;
+                                const cD = hScore?.current ?? 0; const cH = aScore?.current ?? 0;
+                                if (cD > cH || otD > otH || pD > pH) novyPostup = "domaci";
+                                else if (cH > cD || otH > otD || pH > pD) novyPostup = "hoste";
+                            }
                         } else {
                             golyDomaci = hScore.current;
                             golyHoste = aScore.current;
@@ -3851,13 +3888,21 @@ async function synchronizujRozpisyVsechLig(isDeep = false) {
                             const p1H = (item.awayScore?.period1 || 0); const p2H = (item.awayScore?.period2 || 0); const p3H = (item.awayScore?.period3 || 0);
                             const regDom = p1D + p2D + p3D;
                             const regHos = p1H + p2H + p3H;
-                            if (regDom === regHos && (gDom !== gHos || item.homeScore?.overtime !== undefined || item.homeScore?.penalties !== undefined)) {
+                            if (regDom === regHos && (gDom !== gHos || item.homeScore?.overtime !== undefined || item.homeScore?.penalties !== undefined || item.winnerCode)) {
                                 gDom = regDom;
                                 gHos = regHos;
-                                novyPostup = (item.homeScore.current > item.awayScore.current) ? "domaci" : "hoste";
+                                const wCode = item.winnerCode;
+                                if (wCode === 1) novyPostup = "domaci";
+                                else if (wCode === 2) novyPostup = "hoste";
+                                else {
+                                    const pD = item.homeScore?.penalties ?? 0; const pH = item.awayScore?.penalties ?? 0;
+                                    const otD = item.homeScore?.overtime ?? 0; const otH = item.awayScore?.overtime ?? 0;
+                                    const cD = item.homeScore?.current ?? 0; const cH = item.awayScore?.current ?? 0;
+                                    if (cD > cH || otD > otH || pD > pH) novyPostup = "domaci";
+                                    else if (cH > cD || otH > otD || pH > pD) novyPostup = "hoste";
+                                }
                             }
                         }
-
                         matchPayload.apiStatus = "FINISHED";
                         matchPayload.vysledek_domaci = gDom;
                         matchPayload.vysledek_hoste = gHos;
