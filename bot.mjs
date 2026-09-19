@@ -522,9 +522,11 @@ async function smartSyncKurzuHokej() {
             const uzMaKurz = RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[matchKey] || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[z.id] || z.odds;
 
             if (!uzMaKurz) {
-                    // 🔓 DOČASNÉ ODEMKNUTÍ: Stáhne dny bez ohledu na záznam v paměti
-                    dnyKeStazeni[sportKlic].add(datumIso);
+                    const dayKey = `ice-hockey_${datumIso}`;
+                if (!RAM_PROCESSED_ODDS_DAYS.has(dayKey)) {
+                    dnyKeStazeni.add(datumIso);
                 }
+            }
         }
     });
 
@@ -4102,9 +4104,9 @@ async function startEnterpriseApplication() {
         const url = req.url || "/";
 
         if (url === "/cron" || url.startsWith("/cron")) {
-            // 🛡️ Tichý Keep-Alive signál z Cloud Functions – drží Render vzhůru bez spouštění duplicitního dotazu na API
+            // 🛡️ Tichý Keep-Alive signál: Pouze zresetuje usínací časovač Renderu (0 API dotazů)
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Keep-alive signál přijat.");
+            res.end("OK - Keep-alive aktivní.");
             return;
         }
 
