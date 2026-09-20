@@ -1842,7 +1842,7 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
 
             if (body > 0) {
                 celkemBoduZapasu += body;
-                hraciSBody.push({ uid, nick: p.nickname, body });
+                hraciSBody.push({ uid, nick: p.nickname, body, tip: tipStr });
                 klubyStats[dNazev].body += body;
                 klubyStats[hNazev].body += body;
                 klubyStats[dNazev].uspesne++;
@@ -1867,7 +1867,7 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         }
 
         if (tipovaloLidi > 1 && hraciSBody.length === 1) {
-            vlciSamotari.push({ zapas: zapasLabel, kolo: koloLabel, hrac: hraciSBody[0].nick, body: hraciSBody[0].body, datum: zapas.datum });
+            vlciSamotari.push({ zapas: zapasLabel, kolo: koloLabel, hrac: hraciSBody[0].nick, body: hraciSBody[0].body, tip: hraciSBody[0].tip, datum: zapas.datum });
         }
 
         if (celkemBoduZapasu > maxRozdanoBodu || (celkemBoduZapasu === maxRozdanoBodu && zlatyDul && presnychZasahu > zlatyDul.presnych)) {
