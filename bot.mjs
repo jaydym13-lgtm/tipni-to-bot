@@ -2111,9 +2111,20 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const dohranaKolaSet = new Set();
     const otevrenaKolaSet = new Set();
 
+    const STANDARD_ZAPASU_LIGY = {
+        "Tipsport Extraliga": 7,
+        "Chance Liga": 8,
+        "Premier League": 10
+    };
+    const ocekavanyPocetZapasu = STANDARD_ZAPASU_LIGY[leagueName] || 0;
+
     Object.keys(kolaZapasyMap).forEach(klicKola => {
         const zapasyVKole = kolaZapasyMap[klicKola];
-        const vsetkoDohrano = zapasyVKole.length > 0 && zapasyVKole.every(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+        const maPlnyPocet = ocekavanyPocetZapasu === 0 || zapasyVKole.length >= ocekavanyPocetZapasu;
+        const bezOdlozenych = zapasyVKole.every(z => z.apiStatus !== "POSTPONED");
+        const vsechnyOdehrane = zapasyVKole.length > 0 && zapasyVKole.every(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+
+        const vsetkoDohrano = maPlnyPocet && bezOdlozenych && vsechnyOdehrane;
         if (vsetkoDohrano) {
             dohranaKolaSet.add(klicKola);
         } else {
@@ -2213,7 +2224,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     const vsechnyHraciKola = Object.keys(vyhraVKolePocet).map(nick => ({
         nickname: nick,
         count: vyhraVKolePocet[nick],
-        rounds: (vyhranaKolaSeznam[nick] || []).join(', ')
+        rounds: (vyhranaKolaSeznam[nick] || []).join(' & ')
     })).filter(p => p.count > 0);
     const unikatniHraciKolaBadges = [...new Set(vsechnyHraciKola.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
     const top3HraciKola = unikatniHraciKolaBadges.map(count => {
