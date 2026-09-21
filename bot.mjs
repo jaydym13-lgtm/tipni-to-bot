@@ -1787,8 +1787,8 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         let celkemBoduZapasu = 0;
         let presnychZasahu = 0;
         const hraciSBody = [];
+        const hraciSTendenci = [];
         let tipovaloLidi = 0;
-
         const dNazev = zapas.domaci || "Domácí";
         const hNazev = zapas.hoste || "Hosté";
 
@@ -1797,13 +1797,12 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         klubyStats[dNazev].zapasu++;
         klubyStats[hNazev].zapasu++;
 
-        Object.keys(uzivateleProfily).forEach(uid => {
-            const p = uzivateleProfily[uid];
-            if (!p.leagues || !p.leagues.includes(leagueName)) return;
-
-            const uSouteze = uzivateleTipy[uid] || {};
-            const uSoutezData = uSouteze[ligaKlic] || {};
-            const uTip = uSoutezData.tipy ? uSoutezData.tipy[zapas.id] : null;
+        Object.keys(zebricekMapa).forEach(uid => {
+            const p = zebricekMapa[uid];
+            const uSouteze = RAM_USERS_TIPS[uid] || {};
+            const uSoutezData = uSouteze[ligaKlic] || { tipy: {} };
+            const uTips = uSoutezData.tipy || {};
+            const uTip = uTips[zapas.id] || uTips[zapas.matchId];
 
             if (!uTip || uTip.tip_domaci === undefined || uTip.tip_domaci === null || String(uTip.tip_domaci).trim() === '') return;
 
@@ -1822,8 +1821,7 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             }
             cetnostTipu[tipStr] = (cetnostTipu[tipStr] || 0) + 1;
 
-            const body = vypocitejBodyZapasuLocal(tDom, tHos, rDom, rHos, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
-
+            const body = vypocitejBodyZapasuLocal(tDom, tHos, rDom, rHos, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch);
             klubyStats[dNazev].celkemTipu++;
             klubyStats[hNazev].celkemTipu++;
 
@@ -1843,6 +1841,10 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             if (body > 0) {
                 celkemBoduZapasu += body;
                 hraciSBody.push({ uid, nick: p.nickname, body, tip: tipStr });
+                // 🐺 Do Vlka samotáře smí pouze hráč, který uhodl tendenci/vítěze (gól útěchy se nepočítá)
+                if (jeTendence || jePresny) {
+                    hraciSTendenci.push({ uid, nick: p.nickname, body, tip: tipStr });
+                }
                 klubyStats[dNazev].body += body;
                 klubyStats[hNazev].body += body;
                 klubyStats[dNazev].uspesne++;
@@ -1866,8 +1868,8 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             totalniVybuchy.push({ zapas: zapasLabel, kolo: koloLabel, datum: zapas.datum });
         }
 
-        if (tipovaloLidi > 1 && hraciSBody.length === 1) {
-            vlciSamotari.push({ zapas: zapasLabel, kolo: koloLabel, hrac: hraciSBody[0].nick, body: hraciSBody[0].body, tip: hraciSBody[0].tip, datum: zapas.datum });
+        if (tipovaloLidi > 1 && hraciSTendenci.length === 1) {
+            vlciSamotari.push({ zapas: zapasLabel, kolo: koloLabel, hrac: hraciSTendenci[0].nick, body: hraciSTendenci[0].body, tip: hraciSTendenci[0].tip, datum: zapas.datum });
         }
 
         if (celkemBoduZapasu > maxRozdanoBodu || (celkemBoduZapasu === maxRozdanoBodu && zlatyDul && presnychZasahu > zlatyDul.presnych)) {
