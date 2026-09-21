@@ -70,6 +70,8 @@ const RAM_LAST_DATA_SIGNATURES = {};
 
 // 🏛️ RAM MEZIPAMĚŤ ŽEBŘÍČKŮ PRO GLOBÁLNÍ SÍŇ SLÁVY
 const RAM_LEAGUE_LEADERBOARDS = {};
+const RAM_LAST_POINTS_SIGNATURES = {};
+const RAM_LEAGUES_META = {}; // ⚡ 0 FIRESTORE READS: Trvalá paměť nastavení a vítězů lig
 
 // 🧮 AUTONOMNÍ VÝPOČET SEZÓNNÍ FORMY TÝMU Z RAM (0 API VOLÁNÍ)
 function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
@@ -451,10 +453,11 @@ async function smartSyncKurzu() {
 
     if (celkemNaparovano > 0) {
         await ulozKurzyDoR2();
-        // ⚽ Přepočítáme pouze fotbalové ligy, kterých se nové kurzy týkají
-        SEZNAM_LIG.filter(l => !l.includes("hokej") && !l.includes("Extraliga")).forEach(lName => {
-            planujRekonstrukciAgregatu(false, lName);
-        });
+        // ⚽ ČISTÁ PIPELINE: Nahrajeme POUZE rozpis.json (žádné žebříčky ani Síň slávy)
+        const fotbaloveLigy = SEZNAM_LIG.filter(l => !l.includes("hokej") && !l.includes("Extraliga"));
+        for (const lName of fotbaloveLigy) {
+            await aktualizujRozpisProLigu(lName);
+        }
     }
 }
 
@@ -531,7 +534,59 @@ async function smartSyncKurzuHokej() {
 
     if (celkemNaparovano > 0) {
         await ulozKurzyDoR2();
-        planujRekonstrukciAgregatu(false, "Tipsport Extraliga");
+        // 🏒 ČISTÁ PIPELINE: Nahrajeme POUZE rozpis.json (žádné žebříčky ani Síň slávy)
+        await aktualizujRozpisProLigu("Tipsport Extraliga");
+    }
+}
+
+// 📦 AUTONOMNÍ ROZPIS PIPELINE: Aktualizuje POUZE rozpis na R2 a pošle puls (0 přepočtů bodů, 0 Síně slávy)
+async function aktualizujRozpisProLigu(leagueName) {
+    const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
+    const timestampNow = new Date().toISOString();
+    const isHockey = leagueName.includes("hokej") || leagueName.includes("Extraliga");
+    const sportKlic = isHockey ? "ice-hockey" : "football";
+
+    const zapasyMapaObohacena = {};
+    Object.entries(centralMatches).forEach(([mId, z]) => {
+        const dTrans = z.domaci;
+        const hTrans = z.hoste;
+        const matchKey = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
+        const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || RAM_CENTRAL_ODDS[leagueName]?.[mId] || z.odds || null;
+        const formaDomaci = spoctiSezonniFormuTymu(dTrans, z.datum, centralMatches);
+        const formaHoste = spoctiSezonniFormuTymu(hTrans, z.datum, centralMatches);
+
+        const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
+        const dayKey = datumIso ? `${sportKlic}_${datumIso}` : null;
+        const bylDenZpracovan = Boolean(dayKey && RAM_PROCESSED_ODDS_DAYS.has(dayKey));
+
+        zapasyMapaObohacena[mId] = {
+            ...z,
+            odds: matchOdds,
+            oddsChecked: bylDenZpracovan,
+            forma: {
+                domaci: formaDomaci,
+                hoste: formaHoste
+            }
+        };
+    });
+
+    const rozpisJson = {
+        zapasyMapa: zapasyMapaObohacena,
+        hasMatches: Object.keys(centralMatches).length > 0,
+        aktualizovano: timestampNow
+    };
+
+    await uploadToR2(leagueName, "rozpis.json", rozpisJson);
+
+    try {
+        const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
+        await pulsRef.set({
+            verzeRozpisu: admin.firestore.FieldValue.increment(1),
+            aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        console.log(`📡 PULS ROZPIS [${leagueName}]: Nové kurzy uloženy na R2 -> verzeRozpisu inkrementována.`);
+    } catch (pulsErr) {
+        console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
     }
 }
 
@@ -799,13 +854,17 @@ async function spustFrontuPrepoctu() {
             QUEUE_DIRTY_LEAGUES.clear();
             QUEUE_HISTORY_LEAGUES.clear();
 
+            let anyPointsChanged = false;
             for (const leagueName of ligyKPrepoctu) {
                 const writeHistory = ligyKHistorii.has(leagueName);
-                await rekonstruujAgregatyProLigu(leagueName, writeHistory);
+                const pointsChanged = await rekonstruujAgregatyProLigu(leagueName, writeHistory);
+                if (pointsChanged) anyPointsChanged = true;
             }
 
-            // 🏛️ SÍŇ SLÁVY SE VYGENERUJE VÝHRADNĚ 1× PO DOKONČENÍ CELÉ DÁVKY
-            await generujHallOfFameR2();
+            // 🏛️ SÍŇ SLÁVY: Vygeneruje se POUZE tehdy, pokud se reálně změnily body v některé lize
+            if (anyPointsChanged) {
+                await generujHallOfFameR2();
+            }
             await aktualizujLiveRadarR2();
         }
     } catch (err) {
@@ -916,20 +975,39 @@ async function hydratujDataZFirestore() {
                     apiStatus: data.apiStatus || "SCHEDULED",
                     postup: data.postup || "",
                     odds: data.odds || undefined,
-                        spyUploaded: jeHotovoNeboPoVykovu,
-                        spyR2Synced: jeHotovoNeboPoVykovu
-                    };
+                    spyUploaded: jeHotovoNeboPoVykovu,
+                    spyR2Synced: jeHotovoNeboPoVykovu
+                };
             });
         }
     }
 
-    console.log("🚀 Všechna data jsou kompletně v RAM. Spouštím rychlou startovní synchronizaci...");
-    await rekonstruujAgregatyVsechny(false);
+    // 🏛️ Jednorázové načtení metadat lig do RAM (vítěz, střelec, kanadské, hasTopMatch)
+    for (const leagueName of SEZNAM_LIG) {
+        try {
+            const lDoc = await db.collection("ligy").doc(leagueName).get();
+            if (lDoc.exists) {
+                RAM_LEAGUES_META[leagueName] = lDoc.data() || {};
+            }
+        } catch (e) {}
+    }
+
+    console.log("🚀 Všechna data jsou kompletně v RAM. Provádím tichou startovní inicializaci paměti...");
+    await rekonstruujAgregatyVsechny(false, true); // isStartup = true (0 falešných pulsů, 0 přepisů Síně slávy)
     jeInicializovano = true;
-    console.log("✅ Úvodní synchronizace hotova bez zbytečného přepisování historie. Zapínám hlídače.");
+    console.log("✅ Úvodní inicializace paměti hotova (0 zbytečných pulsů, 0 přepisů Síně slávy). Zapínám hlídače.");
 }
 
 function zapniReaktivniSluchatka() {
+    // 🏛️ Pasivní listener metadat lig (reaguje pouze pokud admin v květnu zadá celkového mistra)
+    SEZNAM_LIG.forEach(leagueName => {
+        db.collection("ligy").doc(leagueName).onSnapshot(docSnap => {
+            if (docSnap.exists) {
+                RAM_LEAGUES_META[leagueName] = docSnap.data() || {};
+            }
+        }, err => console.error(`❌ Chyba streamu metadat ligy ${leagueName}:`, err));
+    });
+
     db.collection("system").doc("bot_config").onSnapshot(doc => {
         if (doc.exists) {
             const data = doc.data() || {};
@@ -1253,11 +1331,16 @@ async function generujHallOfFameR2() {
 }
 
 // --- 🧮 AGREGÁTOR PAMĚTI ---
-async function rekonstruujAgregatyVsechny(forceWriteHistory = false) {
+async function rekonstruujAgregatyVsechny(forceWriteHistory = false, isStartup = false) {
+    let anyPointsChanged = false;
     for (const leagueName of SEZNAM_LIG) {
-        await rekonstruujAgregatyProLigu(leagueName, forceWriteHistory);
+        const pointsChanged = await rekonstruujAgregatyProLigu(leagueName, forceWriteHistory, isStartup);
+        if (pointsChanged) anyPointsChanged = true;
     }
-    await generujHallOfFameR2();
+    // Při startu bota Síň slávy nepřepisujeme, spustí se jen při reálné změně bodů
+    if (!isStartup && anyPointsChanged) {
+        await generujHallOfFameR2();
+    }
     await aktualizujLiveRadarR2();
 }
 
@@ -1916,12 +1999,12 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         };
 }
 
-async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false) {
+async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false, isStartup = false) {
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
 
-    const leagueDoc = await db.collection("ligy").doc(leagueName).get().catch(() => null);
-    const realLeagueData = leagueDoc && leagueDoc.exists ? leagueDoc.data() : null;
+    // ⚡ 0 FIRESTORE READS: Čteme metadata z RAM paměti
+    const realLeagueData = RAM_LEAGUES_META[leagueName] || null;
 
     await autoGenerujTopZapasyProLigu(leagueName, realLeagueData);
 
@@ -2999,21 +3082,25 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
         `${p.uid}:${p.celkemBodu}_${p.presneVysledkyCount}_${p.spravneTendenceCount}_${p.celkemBoduLive}`
     ).sort().join('|');
 
-    const cistaKurzyOtisk = Object.entries(RAM_CENTRAL_ODDS[leagueName] || {}).map(([k, o]) => 
-        `${k}:${o["1"]}_${o["X"]}_${o["2"]}`
-    ).sort().join('|');
-
-    const aktualniOtisk = `${cistaDataZapasu}#${cisteBodyTabulky}#${cistaKurzyOtisk}#${liveMatchIds.length > 0}`;
+    // 🛡️ ČISTÝ PODPIS TABULKY: Žebříček sleduje pouze zápasy a body (kurzy sem nepatří!)
+    const aktualniOtisk = `${cistaDataZapasu}#${cisteBodyTabulky}#${liveMatchIds.length > 0}`;
 
     const dataSeZmenila = (RAM_LAST_DATA_SIGNATURES[leagueName] !== aktualniOtisk);
+    const bodySeZmenily = (RAM_LAST_POINTS_SIGNATURES[leagueName] !== cisteBodyTabulky);
+
+    RAM_LAST_DATA_SIGNATURES[leagueName] = aktualniOtisk;
+    RAM_LAST_POINTS_SIGNATURES[leagueName] = cisteBodyTabulky;
+
+    // 🛡️ TICHÝ START: Při probuzení bota pouze naplníme RAM paměť bez pulsu a bez přepisování R2
+    if (isStartup) {
+        return false;
+    }
 
     if (dataSeZmenila || forceWriteHistory) {
-        RAM_LAST_DATA_SIGNATURES[leagueName] = aktualniOtisk;
         await uploadToR2(leagueName, "leaderboard.json", leaderboardJson);
         await uploadToR2(leagueName, "rozpis.json", rozpisJson);
         await rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches);
 
-        // 🛡️ Zápis pulsu se provede VÝHRADNĚ tehdy, pokud se reálně změnila data (ne kvůli historii!)
         if (dataSeZmenila) {
             try {
                 const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
@@ -3022,12 +3109,12 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
                     verzeZebricku: admin.firestore.FieldValue.increment(1),
                     aktualizovano: admin.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
-                console.log(`📡 PULS SYNC [${leagueName}]: Změna dat detekována -> Firestore puls aktualizován.`);
+                console.log(`📡 PULS SYNC [${leagueName}]: Reálná změna výsledků/bodů -> Firestore puls aktualizován.`);
             } catch (pulsErr) {
                 console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
             }
         } else {
-            console.log(`🛡️ HISTORIE SYNC [${leagueName}]: Zpracována událost bez změny dat (0 Firestore puls).`);
+            console.log(`🛡️ HISTORIE SYNC [${leagueName}]: Uloženy tipy hráče bez změny pořadí (0 Firestore puls).`);
         }
     }
 
@@ -3125,10 +3212,11 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false)
     } catch (radarErr) {
         console.error(`❌ Selhal autonomní zápis radaru pro ${leagueName}:`, radarErr);
     }
+
+    return Boolean(bodySeZmenily);
 }
 
 let isHeartbeatRunning = false;
-
 // ⚡ Bleskový stahovač live streamu z RapidAPI SportAPI7
 async function fetchSportApiLive(sport) {
     if (!RAPIDAPI_KEY) return [];
