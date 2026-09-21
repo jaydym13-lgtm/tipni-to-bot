@@ -458,53 +458,12 @@ async function smartSyncKurzu() {
     }
 }
 
-// 🏒 HOKEJ SMART SYNC: PŘÍSNÁ 3-FÁZOVÁ KONTROLA VÝHRADNĚ PRO TIPSPORT EXTRALIGU
+// 🏒 HOKEJ SMART SYNC: PŘÍSNÁ KONTROLA VÝHRADNĚ PRO TIPSPORT EXTRALIGU (V ČASOVÉ ZÓNĚ PRAHA)
 async function smartSyncKurzuHokej() {
     const nyni = new Date();
-    const den = nyni.getDay(); // 0=Ne, 1=Po, 2=Út, 3=St, 4=Čt, 5=Pá, 6=So
-    const hod = nyni.getHours();
+    const nowPrague = new Date(nyni.toLocaleString("en-US", { timeZone: "Europe/Prague" }));
 
-    let startBloku = new Date(nyni);
-    let konecBloku = new Date(nyni);
-
-    // 1. Blok: Sobota 12:00 -> Pondělí 15:00 (pokrývá Ne a Po do 15:00)
-    if ((den === 6 && hod >= 12) || den === 0 || (den === 1 && hod < 15)) {
-        const dnyOdSoboty = (den === 6) ? 0 : (den === 0 ? 1 : 2);
-        startBloku.setDate(nyni.getDate() - dnyOdSoboty);
-        startBloku.setHours(12, 0, 0, 0);
-
-        const dnyDoPondeli = (den === 6) ? 2 : (den === 0 ? 1 : 0);
-        konecBloku.setDate(nyni.getDate() + dnyDoPondeli);
-        konecBloku.setHours(15, 0, 0, 0);
-    }
-    // 2. Blok: Pondělí 15:00 -> Čtvrtek 09:00 (pokrývá Út, St a Čt do 09:00)
-    else if ((den === 1 && hod >= 15) || den === 2 || den === 3 || (den === 4 && hod < 9)) {
-        const dnyOdPondeli = (den === 1) ? 0 : (den === 2 ? 1 : (den === 3 ? 2 : 3));
-        startBloku.setDate(nyni.getDate() - dnyOdPondeli);
-        startBloku.setHours(15, 0, 0, 0);
-
-        const dnyDoCtvrtka = (den === 1) ? 3 : (den === 2 ? 2 : (den === 3 ? 1 : 0));
-        konecBloku.setDate(nyni.getDate() + dnyDoCtvrtka);
-        konecBloku.setHours(9, 0, 0, 0);
-    }
-    // 3. Blok: Čtvrtek 09:00 -> Sobota 12:00 (pokrývá Čt od 09:00, Pá a So do 12:00)
-    else {
-        const dnyOdCtvrtka = (den === 4) ? 0 : (den === 5 ? 1 : 2);
-        startBloku.setDate(nyni.getDate() - dnyOdCtvrtka);
-        startBloku.setHours(9, 0, 0, 0);
-
-        const dnyDoSoboty = (den === 4) ? 2 : (den === 5 ? 1 : 0);
-        konecBloku.setDate(nyni.getDate() + dnyDoSoboty);
-        konecBloku.setHours(12, 0, 0, 0);
-    }
-
-    const minTargetMs = startBloku.getTime();
-    const maxTargetMs = konecBloku.getTime();
-
-    const datumStartStr = startBloku.toISOString();
-    const datumKonecStr = konecBloku.toISOString();
-
-    console.log(`🏒 HOKEJ SYNC: Kontroluji mantinel (${datumStartStr} až ${datumKonecStr})...`);
+    console.log(`🏒 HOKEJ SYNC: Kontroluji zápasy Tipsport Extraligy k datu ${nowPrague.toLocaleDateString("cs-CZ")} ${nowPrague.toLocaleTimeString("cs-CZ")}...`);
 
     const dnyKeStazeni = new Set();
     const zapasy = RAM_CENTRAL_MATCHES["Tipsport Extraliga"] || {};
@@ -514,28 +473,53 @@ async function smartSyncKurzuHokej() {
         const matchMs = Date.parse(z.datum);
         if (isNaN(matchMs)) return;
 
-        // Kontrola, zda zápas spadá přesně do daného okna
-        if (matchMs >= minTargetMs && matchMs <= maxTargetMs) {
-            const matchDate = new Date(matchMs);
-            const datumIso = matchDate.toISOString().split("T")[0];
-            const matchKey = `${PL_NORM(z.domaci)} vs ${PL_NORM(z.hoste)}`;
-            const uzMaKurz = RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[matchKey] || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[z.id] || z.odds;
+        // Kontrola: zápasy v minulosti nebo vzdálenější než 7 dní ignorujeme
+        if (matchMs < (nyni.getTime() - 2 * 3600 * 1000) || matchMs > (nyni.getTime() + 7 * 24 * 3600 * 1000)) return;
 
-            if (!uzMaKurz) {
-                    const dayKey = `ice-hockey_${datumIso}`;
-                if (!RAM_PROCESSED_ODDS_DAYS.has(dayKey)) {
-                    dnyKeStazeni.add(datumIso);
-                }
-            }
+        // Převod data zápasu do časové zóny Praha
+        const matchDatePrague = new Date(new Date(matchMs).toLocaleString("en-US", { timeZone: "Europe/Prague" }));
+        const mDay = matchDatePrague.getDay(); // 0=Ne, 1=Po, 2=Út, 3=St, 4=Čt, 5=Pá, 6=So
+        const mHour = matchDatePrague.getHours();
+
+        const syncDate = new Date(matchDatePrague);
+
+        // 1. Blok: Sobota 12:00 -> pokrývá Ne a Po do 15:00 (a So od 12:00)
+        if ((mDay === 6 && mHour >= 12) || mDay === 0 || (mDay === 1 && mHour < 15)) {
+            const daysBack = (mDay === 6) ? 0 : (mDay === 0 ? 1 : 2);
+            syncDate.setDate(syncDate.getDate() - daysBack);
+            syncDate.setHours(12, 0, 0, 0);
+        }
+        // 2. Blok: Pondělí 15:00 -> pokrývá Út a St, a Čt do 09:00
+        else if ((mDay === 1 && mHour >= 15) || mDay === 2 || mDay === 3 || (mDay === 4 && mHour < 9)) {
+            const daysBack = (mDay === 1) ? 0 : (mDay === 2 ? 1 : (mDay === 3 ? 2 : 3));
+            syncDate.setDate(syncDate.getDate() - daysBack);
+            syncDate.setHours(15, 0, 0, 0);
+        }
+        // 3. Blok: Čtvrtek 09:00 -> pokrývá Čt od 09:00, Pá a So do 12:00
+        else {
+            const daysBack = (mDay === 4) ? 0 : (mDay === 5 ? 1 : 2);
+            syncDate.setDate(syncDate.getDate() - daysBack);
+            syncDate.setHours(9, 0, 0, 0);
+        }
+
+        const melByUzMitKurz = nowPrague.getTime() >= syncDate.getTime();
+        if (!melByUzMitKurz) return;
+
+        const matchKey = `${PL_NORM(z.domaci)} vs ${PL_NORM(z.hoste)}`;
+        const uzMaKurz = RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[matchKey] || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[z.id] || z.odds;
+
+        if (!uzMaKurz) {
+            const datumIso = new Date(matchMs).toLocaleDateString("en-CA", { timeZone: "Europe/Prague" });
+            dnyKeStazeni.add(datumIso);
         }
     });
 
     if (dnyKeStazeni.size === 0) {
-        console.log(`🛡️ HOKEJ SYNC: Žádné chybějící dny kurzů pro Extraligu v daném okně. Přeskakuji API (0 requestů).`);
+        console.log(`🛡️ HOKEJ SYNC: Všechny aktuální zápasy Extraligy mají kurzy nebo ještě nenastal jejich termín. Přeskakuji API.`);
         return;
     }
 
-    console.log(`🚀 HOKEJ SYNC: Stahuji kurzy pro ${dnyKeStazeni.size} hokejových dnů.`);
+    console.log(`🚀 HOKEJ SYNC: Stahuji kurzy pro ${dnyKeStazeni.size} hokejových dnů (${Array.from(dnyKeStazeni).join(", ")})...`);
 
     let celkemNaparovano = 0;
     for (const datum of dnyKeStazeni) {
