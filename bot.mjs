@@ -4153,19 +4153,21 @@ async function startEnterpriseApplication() {
             return;
         }
 
-        if (url === "/sync-odds" || url.startsWith("/sync-odds")) {
-            console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím Smart Sync fotbalových kurzů...`);
-            smartSyncKurzu().catch(err => console.error("❌ Chyba synchronizace fotbalových kurzů:", err));
-            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Smart Sync fotbalových kurzů spuštěn.");
-            return;
-        }
-
+        // 🏒 HOKEJ MUSÍ BÝT PRVNÍ: Jinak ho spolkne fotbalový prefix "/sync-odds"!
         if (url === "/sync-odds-hockey" || url.startsWith("/sync-odds-hockey")) {
             console.log(`🏒 SERVISNÍ PING (/sync-odds-hockey): Spouštím Smart Sync hokejových kurzů...`);
             smartSyncKurzuHokej().catch(err => console.error("❌ Chyba synchronizace hokejových kurzů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
             res.end("OK - Smart Sync hokejových kurzů spuštěn.");
+            return;
+        }
+
+        // ⚽ FOTBAL: Zpracuje se pouze čistý "/sync-odds"
+        if (url === "/sync-odds" || url.startsWith("/sync-odds?") || url.startsWith("/sync-odds/")) {
+            console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím Smart Sync fotbalových kurzů...`);
+            smartSyncKurzu().catch(err => console.error("❌ Chyba synchronizace fotbalových kurzů:", err));
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Smart Sync fotbalových kurzů spuštěn.");
             return;
         }
 
