@@ -1797,9 +1797,11 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         klubyStats[dNazev].zapasu++;
         klubyStats[hNazev].zapasu++;
 
-        Object.keys(zebricekMapa).forEach(uid => {
-            const p = zebricekMapa[uid];
-            const uSouteze = RAM_USERS_TIPS[uid] || {};
+        Object.keys(uzivateleProfily).forEach(uid => {
+            const p = uzivateleProfily[uid];
+            if (!p.leagues || !p.leagues.includes(leagueName)) return;
+
+            const uSouteze = uzivateleTipy[uid] || {};
             const uSoutezData = uSouteze[ligaKlic] || { tipy: {} };
             const uTips = uSoutezData.tipy || {};
             const uTip = uTips[zapas.id] || uTips[zapas.matchId];
@@ -1821,7 +1823,7 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             }
             cetnostTipu[tipStr] = (cetnostTipu[tipStr] || 0) + 1;
 
-            const body = vypocitejBodyZapasuLocal(tDom, tHos, rDom, rHos, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch);
+            const body = vypocitejBodyZapasuLocal(tDom, tHos, rDom, rHos, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
             klubyStats[dNazev].celkemTipu++;
             klubyStats[hNazev].celkemTipu++;
 
