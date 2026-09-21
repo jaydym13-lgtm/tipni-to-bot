@@ -483,17 +483,17 @@ async function smartSyncKurzuHokej() {
 
         const syncDate = new Date(matchDatePrague);
 
-        // 1. Blok: Sobota 12:00 -> pokrývá Ne a Po do 15:00 (a So od 12:00)
-        if ((mDay === 6 && mHour >= 12) || mDay === 0 || (mDay === 1 && mHour < 15)) {
+        // 1. Blok: Sobota 12:00 -> pokrývá Ne a Po do 10:00 (a So od 12:00)
+        if ((mDay === 6 && mHour >= 12) || mDay === 0 || (mDay === 1 && mHour < 10)) {
             const daysBack = (mDay === 6) ? 0 : (mDay === 0 ? 1 : 2);
             syncDate.setDate(syncDate.getDate() - daysBack);
             syncDate.setHours(12, 0, 0, 0);
         }
-        // 2. Blok: Pondělí 15:00 -> pokrývá Út a St, a Čt do 09:00
-        else if ((mDay === 1 && mHour >= 15) || mDay === 2 || mDay === 3 || (mDay === 4 && mHour < 9)) {
+        // 2. Blok: Pondělí 10:00 -> pokrývá Út a St, a Čt do 09:00
+        else if ((mDay === 1 && mHour >= 10) || mDay === 2 || mDay === 3 || (mDay === 4 && mHour < 9)) {
             const daysBack = (mDay === 1) ? 0 : (mDay === 2 ? 1 : (mDay === 3 ? 2 : 3));
             syncDate.setDate(syncDate.getDate() - daysBack);
-            syncDate.setHours(15, 0, 0, 0);
+            syncDate.setHours(10, 0, 0, 0);
         }
         // 3. Blok: Čtvrtek 09:00 -> pokrývá Čt od 09:00, Pá a So do 12:00
         else {
