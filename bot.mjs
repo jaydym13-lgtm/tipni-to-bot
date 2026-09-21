@@ -1843,8 +1843,9 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             if (body > 0) {
                 celkemBoduZapasu += body;
                 hraciSBody.push({ uid, nick: p.nickname, body, tip: tipStr });
-                // 🐺 Do Vlka samotáře smí pouze hráč, který uhodl tendenci/vítěze (gól útěchy se nepočítá)
-                if (jeTendence || jePresny) {
+                // 🐺 Do Vlka samotáře: v hokeji kdokoliv s body > 0 (gól útěchy tu není), ve fotbale vyřazujeme gól útěchy
+                const maPlatnouTrefu = isHockey ? (body > 0) : (jeTendence || jePresny);
+                if (maPlatnouTrefu) {
                     hraciSTendenci.push({ uid, nick: p.nickname, body, tip: tipStr });
                 }
                 klubyStats[dNazev].body += body;
