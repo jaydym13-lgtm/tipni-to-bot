@@ -2215,7 +2215,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
 
     const perfektniKolaSeznam = [];
 
-    // 📊 VÝPOČET NATIPOVANÝCH A NENATIPOVANÝCH KOL ZE SKUTEČNĚ DOHRANÝCH KOL
+    // 📊 VÝPOČET NATIPOVANÝCH A NENATIPOVANÝCH KOL ZE SKUTEČNĚ DOHRANÝCH KOL (7 ZÁPASŮ NA KOLO)
     Object.keys(zebricekMapa).forEach(uid => {
         let natipovanaKola = 0;
         let nenatipovanaKola = 0;
@@ -2228,12 +2228,12 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
             const zapasyVKole = kolaZapasyMap[klicKola] || [];
             if (zapasyVKole.length === 0) return;
 
-            const pocetNatipovanych = zapasyVKole.filter(z => {
+            const maNatipovano = zapasyVKole.some(z => {
                 const t = uTips[z.id || z.matchId];
                 return t && t.tip_domaci !== undefined && t.tip_domaci !== null && String(t.tip_domaci).trim() !== '';
-            }).length;
+            });
 
-            if (pocetNatipovanych > 0) {
+            if (maNatipovano) {
                 natipovanaKola++;
             } else {
                 nenatipovanaKola++;
@@ -3140,20 +3140,16 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         await uploadToR2(leagueName, "rozpis.json", rozpisJson);
         await rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches);
 
-        if (dataSeZmenila) {
-            try {
-                const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
-                await pulsRef.set({
-                    verzeRozpisu: admin.firestore.FieldValue.increment(1),
-                    verzeZebricku: admin.firestore.FieldValue.increment(1),
-                    aktualizovano: admin.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-                console.log(`📡 PULS SYNC [${leagueName}]: Reálná změna výsledků/bodů -> Firestore puls aktualizován.`);
-            } catch (pulsErr) {
-                console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
-            }
-        } else {
-            console.log(`🛡️ HISTORIE SYNC [${leagueName}]: Uloženy tipy hráče bez změny pořadí (0 Firestore puls).`);
+        try {
+            const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
+            await pulsRef.set({
+                verzeRozpisu: admin.firestore.FieldValue.increment(1),
+                verzeZebricku: admin.firestore.FieldValue.increment(1),
+                aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log(`📡 PULS SYNC [${leagueName}]: R2 aktualizováno -> Firestore puls inkrementován.`);
+        } catch (pulsErr) {
+            console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
         }
     }
 
