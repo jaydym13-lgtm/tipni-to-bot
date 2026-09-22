@@ -4265,6 +4265,24 @@ async function startEnterpriseApplication() {
             return;
         }
 
+        // ⚡ SERVISNÍ PING PRO OKAMŽITÉ PŘEGENEROVÁNÍ ROZPISŮ A FORMY NA R2
+        if (url === "/force-rozpis" || url.startsWith("/force-rozpis")) {
+            console.log("⚡ SERVISNÍ PING (/force-rozpis): Přegenerovávám rozpisy a formu pro všechny ligy...");
+            (async () => {
+                try {
+                    for (const lName of SEZNAM_LIG) {
+                        await aktualizujRozpisProLigu(lName);
+                    }
+                    console.log("✅ FORCE ROZPIS: Rozpisy a forma úspěšně nahrány na R2.");
+                } catch (e) {
+                    console.error("❌ FORCE ROZPIS chyba:", e);
+                }
+            })();
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Vynucené přegenerování rozpisů a formy (VP/PP) pro všechny ligy spuštěno.");
+            return;
+        }
+
         if (url === "/sync-event-map" || url.startsWith("/sync-event-map")) {
             console.log(`🗺️ SERVISNÍ PING (/sync-event-map): Spouštím měsíční generování mapy ID...`);
             synchronizujSofaScoreEventMap().catch(err => console.error("❌ Chyba mapování:", err));
