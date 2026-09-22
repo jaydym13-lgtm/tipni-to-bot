@@ -2215,6 +2215,44 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
 
     const perfektniKolaSeznam = [];
 
+    // 📊 VÝPOČET NATIPOVANÝCH A NENATIPOVANÝCH KOL (CELÝCH KOL, NIKOLIV ZÁPASŮ)
+    const vyhodnocenaKolaSeznam = Object.keys(kolaZapasyMap).filter(klicKola => {
+        const zapasyVKole = kolaZapasyMap[klicKola] || [];
+        const odehrane = zapasyVKole.filter(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+        const beziLive = zapasyVKole.some(z => z.apiStatus === "IN_PLAY" || z.apiStatus === "PAUSED");
+        const cekajiNaHru = zapasyVKole.some(z => z.vysledek_domaci === undefined && z.apiStatus !== "POSTPONED");
+        return odehrane.length > 0 && !beziLive && !cekajiNaHru;
+    });
+
+    Object.keys(zebricekMapa).forEach(uid => {
+        let natipovanaKola = 0;
+        let nenatipovanaKola = 0;
+
+        const uSouteze = RAM_USERS_TIPS[uid] || {};
+        const uSoutezData = uSouteze[ligaKlic] || {};
+        const uTips = uSoutezData.tipy || {};
+
+        vyhodnocenaKolaSeznam.forEach(klicKola => {
+            const zapasyVKole = kolaZapasyMap[klicKola] || [];
+            const odehraneVKole = zapasyVKole.filter(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED");
+            if (odehraneVKole.length === 0) return;
+
+            const pocetNatipovanych = odehraneVKole.filter(z => {
+                const t = uTips[z.id || z.matchId];
+                return t && t.tip_domaci !== undefined && t.tip_domaci !== null && String(t.tip_domaci).trim() !== '';
+            }).length;
+
+            if (pocetNatipovanych > 0) {
+                natipovanaKola++;
+            } else {
+                nenatipovanaKola++;
+            }
+        });
+
+        zebricekMapa[uid].natipovanaKola = natipovanaKola;
+        zebricekMapa[uid].nenatipovanaKola = nenatipovanaKola;
+    });
+
     if (pravidlaLigi.roundBonus && pravidlaLigi.roundBonus > 0) {
         dohranaKolaSet.forEach(klicKola => {
             const zapasyVKole = kolaZapasyMap[klicKola];
@@ -2470,6 +2508,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
             vitezMs: zebricekMapa[uid].vitezMs, nejStrelec: zebricekMapa[uid].nejStrelec, nejKanadske: zebricekMapa[uid].nejKanadske,
             bodyKoloAktualni: zebricekMapa[uid].bodyPoKolech[aktivniKolo] || 0,
             otevrenaKola: pOtevrenaKola,
+            natipovanaKola: zebricekMapa[uid].natipovanaKola || 0,
+            nenatipovanaKola: zebricekMapa[uid].nenatipovanaKola || 0,
             efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[uid].bodyZapasuCelkem / maxMoznychBoduZapasu) * 100 : 0
         };
     }).sort((a, b) => {
@@ -2495,6 +2535,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
             vitezMs: zebricekMapa[uid].vitezMs, nejStrelec: zebricekMapa[uid].nejStrelec, nejKanadske: zebricekMapa[uid].nejKanadske,
             bodyKoloAktualni: zebricekMapa[uid].bodyPoKolechLive?.[aktivniKolo] !== undefined ? zebricekMapa[uid].bodyPoKolechLive[aktivniKolo] : (zebricekMapa[uid].bodyPoKolech[aktivniKolo] || 0),
             otevrenaKola: pOtevrenaKolaLive,
+            natipovanaKola: zebricekMapa[uid].natipovanaKola || 0,
+            nenatipovanaKola: zebricekMapa[uid].nenatipovanaKola || 0,
             efektivitaProcento: maxMoznychBoduZapasu > 0 ? (zebricekMapa[uid].bodyZapasuCelkemLive / maxMoznychBoduZapasu) * 100 : 0
         };
     }).sort((a, b) => {
@@ -4280,6 +4322,25 @@ async function startEnterpriseApplication() {
             })();
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
             res.end("OK - Vynucené přegenerování rozpisů a formy (VP/PP) pro všechny ligy spuštěno.");
+            return;
+        }
+
+        // ⚡ SERVISNÍ PING PRO OKAMŽITÉ PŘEGENEROVÁNÍ ŽEBŘÍČKŮ, ROZPISŮ A KOL NA R2
+        if (url === "/force-rozpis" || url.startsWith("/force-rozpis")) {
+            console.log("⚡ SERVISNÍ PING (/force-rozpis): Přegenerovávám kompletní žebříčky a rozpisy pro všechny ligy...");
+            (async () => {
+                try {
+                    for (const lName of SEZNAM_LIG) {
+                        await rekonstruujAgregatyProLigu(lName, true);
+                    }
+                    await generujHallOfFameR2();
+                    console.log("✅ FORCE ROZPIS: Kompletní žebříčky (včetně natipovaných kol) a rozpisy úspěšně nahrány na R2.");
+                } catch (e) {
+                    console.error("❌ FORCE ROZPIS chyba:", e);
+                }
+            })();
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Kompletní přepočet žebříčků, rozpisů a natipovaných kol spuštěn.");
             return;
         }
 
