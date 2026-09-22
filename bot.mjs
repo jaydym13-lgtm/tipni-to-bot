@@ -103,7 +103,13 @@ function spoctiSezonniFormuTymu(tym, datumZapasuIso, allMatchesInLeague) {
         const gOni = jeDoma ? gHos : gDom;
 
         if (gMy > gOni) return 'V';
-        if (gMy === gOni) return 'R';
+        if (gMy === gOni) {
+            if (z.postup) {
+                const vyhralNasPostup = (jeDoma && z.postup === 'domaci') || (!jeDoma && z.postup === 'hoste');
+                return vyhralNasPostup ? 'VP' : 'PP';
+            }
+            return 'R';
+        }
         return 'P';
     });
 }
