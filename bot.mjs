@@ -560,10 +560,8 @@ async function aktualizujRozpisProLigu(leagueName) {
         const hTrans = z.hoste;
         const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
         const datedKey = datumIso ? `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}_${datumIso}` : null;
-        // Kurz bereme VÝHRADNĚ z centrálního trezoru (podle ID nebo přesného data)
-        const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
-
-        // 🧹 OČISTA: Pokud zápas nemá platný kurz, parazitní data z paměti natvrdo vymažeme!
+        // Čisté párování: buď má zápas kurz sám v sobě, nebo v trezoru podle data či ID
+        const matchOdds = z.odds || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || RAM_CENTRAL_ODDS[leagueName]?.[mId] || null;
         if (matchOdds) {
             z.odds = matchOdds;
         } else {
@@ -1128,7 +1126,7 @@ function zapniReaktivniSluchatka() {
 
                     if (!jeShodne) {
                         realnaZmena = true;
-                        const finalOdds = data.odds || stary.odds || undefined;
+                        const finalOdds = data.odds || undefined;
                         RAM_CENTRAL_MATCHES[leagueName][matchId] = {
                             domaci: data.domaci || stary.domaci || "Neznámý",
                             hoste: data.hoste || stary.hoste || "Neznámý",
@@ -1147,6 +1145,17 @@ function zapniReaktivniSluchatka() {
                         if (finalOdds) {
                             if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
                             RAM_CENTRAL_ODDS[leagueName][matchId] = finalOdds;
+                        } else if (RAM_CENTRAL_ODDS[leagueName]) {
+                            delete RAM_CENTRAL_ODDS[leagueName][matchId];
+                            const datumStr = isoDatum ? isoDatum.split("T")[0] : "";
+                            const dN = PL_NORM(data.domaci || stary.domaci);
+                            const hN = PL_NORM(data.hoste || stary.hoste);
+                            if (datumStr && dN && hN) {
+                                delete RAM_CENTRAL_ODDS[leagueName][`${dN} vs ${hN}_${datumStr}`];
+                            }
+                            if (dN && hN) {
+                                delete RAM_CENTRAL_ODDS[leagueName][`${dN} vs ${hN}`];
+                            }
                         }
                     }
                 }
@@ -3094,10 +3103,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         const hTrans = z.hoste;
         const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
         const datedKey = datumIso ? `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}_${datumIso}` : null;
-        // Kurz bereme VÝHRADNĚ z centrálního trezoru (podle ID nebo přesného data)
-        const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
-
-        // 🧹 OČISTA: Pokud zápas nemá platný kurz, parazitní data z paměti natvrdo vymažeme!
+        // Čisté párování: buď má zápas kurz sám v sobě, nebo v trezoru podle data či ID
+        const matchOdds = z.odds || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || RAM_CENTRAL_ODDS[leagueName]?.[mId] || null;
         if (matchOdds) {
             z.odds = matchOdds;
         } else {
