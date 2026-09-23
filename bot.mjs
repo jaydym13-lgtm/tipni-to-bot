@@ -560,7 +560,19 @@ async function aktualizujRozpisProLigu(leagueName) {
         const hTrans = z.hoste;
         const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
         const datedKey = datumIso ? `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}_${datumIso}` : null;
-        const matchOdds = z.odds || RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
+        // 1. Ruční kurz zadaný adminem v administraci (nemá značku Bet365)
+        const manualOdds = (z.odds && z.odds.bookmaker !== "Bet365") ? z.odds : null;
+        // 2. Automatický kurz Bet365 výhradně pro toto ID nebo tento konkrétní den výkopu
+        const apiOdds = RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
+        const matchOdds = manualOdds || apiOdds;
+
+        // 🧹 OČISTA: Pokud zápas nemá platný kurz, parazitní data z paměti natvrdo vymažeme!
+        if (matchOdds) {
+            z.odds = matchOdds;
+        } else {
+            delete z.odds;
+        }
+
         const formaDomaci = spoctiSezonniFormuTymu(dTrans, z.datum, centralMatches);
         const formaHoste = spoctiSezonniFormuTymu(hTrans, z.datum, centralMatches);
 
@@ -3085,7 +3097,19 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         const hTrans = z.hoste;
         const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
         const datedKey = datumIso ? `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}_${datumIso}` : null;
-        const matchOdds = z.odds || RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
+        // 1. Ruční kurz zadaný adminem v administraci (nemá značku Bet365)
+        const manualOdds = (z.odds && z.odds.bookmaker !== "Bet365") ? z.odds : null;
+        // 2. Automatický kurz Bet365 výhradně pro toto ID nebo tento konkrétní den výkopu
+        const apiOdds = RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
+        const matchOdds = manualOdds || apiOdds;
+
+        // 🧹 OČISTA: Pokud zápas nemá platný kurz, parazitní data z paměti natvrdo vymažeme!
+        if (matchOdds) {
+            z.odds = matchOdds;
+        } else {
+            delete z.odds;
+        }
+
         const formaDomaci = spoctiSezonniFormuTymu(dTrans, z.datum, centralMatches);
         const formaHoste = spoctiSezonniFormuTymu(hTrans, z.datum, centralMatches);
 
@@ -4300,12 +4324,22 @@ async function startEnterpriseApplication() {
         if (url === "/force-rozpis" || url.startsWith("/force-rozpis")) {
             console.log("⚡ SERVISNÍ PING (/force-rozpis): Přegenerovávám kompletní žebříčky, rozpisy a natipovaná kola pro všechny ligy...");
             (async () => {
-                try {
+                try // 🧹 GENERÁLNÍ OČISTA: Vymažeme staré nedatované klíče z centrální RAM mezipaměti
+                    Object.keys(RAM_CENTRAL_ODDS).forEach(lKey => {
+                        Object.keys(RAM_CENTRAL_ODDS[lKey] || {}).forEach(k => {
+                            if (k.includes(" vs ") && !k.includes("_")) {
+                                delete RAM_CENTRAL_ODDS[lKey][k];
+                            }
+                        });
+                    });
+                    await ulozKurzyDoR2();
+                    console.log("🧹 OČISTA: Staré nedatované klíče kurzů smazány z RAM i R2.");
+
                     for (const lName of SEZNAM_LIG) {
                         await rekonstruujAgregatyProLigu(lName, true);
                     }
                     await generujHallOfFameR2();
-                    console.log("✅ FORCE ROZPIS: Kompletní žebříčky (včetně natipovaných kol) a rozpisy úspěšně nahrány na R2.");
+                    console.log("✅ FORCE ROZPIS: Kompletní žebříčky, vyčištěné rozpisy a natipovaná kola úspěšně nahrány na R2.");
                 } catch (e) {
                     console.error("❌ FORCE ROZPIS chyba:", e);
                 }
