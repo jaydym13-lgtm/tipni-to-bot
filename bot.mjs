@@ -1150,6 +1150,7 @@ function zapniReaktivniSluchatka() {
             }
         }, err => console.error(`❌ Chyba streamu pulsu pro ${leagueName}:`, err));
     });
+}
 
 // --- 📡 GLOBÁLNÍ LIVE RADAR PRO MENU A KATALOG (0 FIRESTORE READS) ---
 let RAM_LAST_LIVE_RADAR_STR = "";
