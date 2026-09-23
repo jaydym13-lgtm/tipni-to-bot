@@ -560,11 +560,8 @@ async function aktualizujRozpisProLigu(leagueName) {
         const hTrans = z.hoste;
         const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
         const datedKey = datumIso ? `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}_${datumIso}` : null;
-        // 1. Ruční kurz zadaný adminem v administraci (nemá značku Bet365)
-        const manualOdds = (z.odds && z.odds.bookmaker !== "Bet365") ? z.odds : null;
-        // 2. Automatický kurz Bet365 výhradně pro toto ID nebo tento konkrétní den výkopu
-        const apiOdds = RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
-        const matchOdds = manualOdds || apiOdds;
+        // Kurz bereme VÝHRADNĚ z centrálního trezoru (podle ID nebo přesného data)
+        const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
 
         // 🧹 OČISTA: Pokud zápas nemá platný kurz, parazitní data z paměti natvrdo vymažeme!
         if (matchOdds) {
@@ -3097,11 +3094,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         const hTrans = z.hoste;
         const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
         const datedKey = datumIso ? `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}_${datumIso}` : null;
-        // 1. Ruční kurz zadaný adminem v administraci (nemá značku Bet365)
-        const manualOdds = (z.odds && z.odds.bookmaker !== "Bet365") ? z.odds : null;
-        // 2. Automatický kurz Bet365 výhradně pro toto ID nebo tento konkrétní den výkopu
-        const apiOdds = RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
-        const matchOdds = manualOdds || apiOdds;
+        // Kurz bereme VÝHRADNĚ z centrálního trezoru (podle ID nebo přesného data)
+        const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
 
         // 🧹 OČISTA: Pokud zápas nemá platný kurz, parazitní data z paměti natvrdo vymažeme!
         if (matchOdds) {
