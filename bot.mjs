@@ -234,7 +234,8 @@ async function synchronizujSofaScoreEventMap() {
                 const rawAway = ev.awayTeam?.name || "";
                 const dNorm = slovnikTymu[rawHome] || rawHome;
                 const hNorm = slovnikTymu[rawAway] || rawAway;
-                const matchKey = `${PL_NORM(dNorm)} vs ${PL_NORM(hNorm)}`;
+                const evDateIso = ev.startTimestamp ? new Date(ev.startTimestamp * 1000).toISOString().split("T")[0] : "";
+                const matchKey = evDateIso ? `${PL_NORM(dNorm)} vs ${PL_NORM(hNorm)}_${evDateIso}` : `${PL_NORM(dNorm)} vs ${PL_NORM(hNorm)}`;
 
                 RAM_EVENT_MAP[eventId] = {
                     league: leagueName,
@@ -315,11 +316,12 @@ async function stahniDenniKurzyRapidApi(sport, datumIso) {
                     bookmaker: "Bet365"
                 };
 
-                // Párování přes přeloženou mapu podle jmen týmů
+                // Párování přes přeloženou mapu podle jmen týmů a konkrétního data
                 const meta = RAM_EVENT_MAP[eventId];
                 if (meta && meta.league) {
                     if (!RAM_CENTRAL_ODDS[meta.league]) RAM_CENTRAL_ODDS[meta.league] = {};
-                    RAM_CENTRAL_ODDS[meta.league][meta.matchKey] = oddsObj;
+                    const datedKey = `${PL_NORM(meta.domaci)} vs ${PL_NORM(meta.hoste)}_${datumIso}`;
+                    RAM_CENTRAL_ODDS[meta.league][datedKey] = oddsObj;
                     RAM_CENTRAL_ODDS[meta.league][eventId] = oddsObj;
                 } else {
                     SEZNAM_LIG.forEach(leagueName => {
@@ -427,8 +429,8 @@ async function smartSyncKurzu() {
             if (matchMs >= minTargetMs && matchMs <= maxTargetMs) {
                 const matchDate = new Date(matchMs);
                 const datumIso = matchDate.toISOString().split("T")[0];
-                const matchKey = `${PL_NORM(z.domaci)} vs ${PL_NORM(z.hoste)}`;
-                const uzMaKurz = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || RAM_CENTRAL_ODDS[leagueName]?.[z.id] || z.odds;
+                const datedKey = `${PL_NORM(z.domaci)} vs ${PL_NORM(z.hoste)}_${datumIso}`;
+                const uzMaKurz = z.odds || RAM_CENTRAL_ODDS[leagueName]?.[z.id] || RAM_CENTRAL_ODDS[leagueName]?.[datedKey];
 
                 if (!uzMaKurz) {
                     const dayKey = `${sportKlic}_${datumIso}`;
@@ -514,11 +516,11 @@ async function smartSyncKurzuHokej() {
         const melByUzMitKurz = nowPrague.getTime() >= syncDate.getTime();
         if (!melByUzMitKurz) return;
 
-        const matchKey = `${PL_NORM(z.domaci)} vs ${PL_NORM(z.hoste)}`;
-        const uzMaKurz = RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[matchKey] || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[z.id] || z.odds;
+        const datumIso = new Date(matchMs).toLocaleDateString("en-CA", { timeZone: "Europe/Prague" });
+        const datedKey = `${PL_NORM(z.domaci)} vs ${PL_NORM(z.hoste)}_${datumIso}`;
+        const uzMaKurz = z.odds || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[z.id] || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[datedKey];
 
         if (!uzMaKurz) {
-            const datumIso = new Date(matchMs).toLocaleDateString("en-CA", { timeZone: "Europe/Prague" });
             dnyKeStazeni.add(datumIso);
         }
     });
@@ -556,12 +558,12 @@ async function aktualizujRozpisProLigu(leagueName) {
     Object.entries(centralMatches).forEach(([mId, z]) => {
         const dTrans = z.domaci;
         const hTrans = z.hoste;
-        const matchKey = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
-        const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || RAM_CENTRAL_ODDS[leagueName]?.[mId] || z.odds || null;
+        const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
+        const datedKey = datumIso ? `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}_${datumIso}` : null;
+        const matchOdds = z.odds || RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
         const formaDomaci = spoctiSezonniFormuTymu(dTrans, z.datum, centralMatches);
         const formaHoste = spoctiSezonniFormuTymu(hTrans, z.datum, centralMatches);
 
-        const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
         const dayKey = datumIso ? `${sportKlic}_${datumIso}` : null;
         const bylDenZpracovan = Boolean(dayKey && RAM_PROCESSED_ODDS_DAYS.has(dayKey));
 
@@ -3081,15 +3083,15 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
     Object.entries(centralMatches).forEach(([mId, z]) => {
         const dTrans = z.domaci;
         const hTrans = z.hoste;
-        const matchKey = `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}`;
-         const matchOdds = RAM_CENTRAL_ODDS[leagueName]?.[matchKey] || RAM_CENTRAL_ODDS[leagueName]?.[mId] || z.odds || null;
+        const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
+        const datedKey = datumIso ? `${PL_NORM(dTrans)} vs ${PL_NORM(hTrans)}_${datumIso}` : null;
+        const matchOdds = z.odds || RAM_CENTRAL_ODDS[leagueName]?.[mId] || (datedKey ? RAM_CENTRAL_ODDS[leagueName]?.[datedKey] : null) || null;
         const formaDomaci = spoctiSezonniFormuTymu(dTrans, z.datum, centralMatches);
         const formaHoste = spoctiSezonniFormuTymu(hTrans, z.datum, centralMatches);
 
         // 🎯 KONTROLA: Byl den tohoto zápasu reálně poslán ke stažení do RapidAPI?
         const isHockey = leagueName.includes("hokej") || leagueName.includes("Extraliga");
         const sportKlic = isHockey ? "ice-hockey" : "football";
-        const datumIso = z.datum ? new Date(z.datum).toISOString().split("T")[0] : null;
         const dayKey = datumIso ? `${sportKlic}_${datumIso}` : null;
         const bylDenZpracovan = Boolean(dayKey && RAM_PROCESSED_ODDS_DAYS.has(dayKey));
 
