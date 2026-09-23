@@ -4324,7 +4324,8 @@ async function startEnterpriseApplication() {
         if (url === "/force-rozpis" || url.startsWith("/force-rozpis")) {
             console.log("⚡ SERVISNÍ PING (/force-rozpis): Přegenerovávám kompletní žebříčky, rozpisy a natipovaná kola pro všechny ligy...");
             (async () => {
-                try // 🧹 GENERÁLNÍ OČISTA: Vymažeme staré nedatované klíče z centrální RAM mezipaměti
+                try {
+                    // 🧹 GENERÁLNÍ OČISTA: Vymažeme staré nedatované klíče z centrální RAM mezipaměti
                     Object.keys(RAM_CENTRAL_ODDS).forEach(lKey => {
                         Object.keys(RAM_CENTRAL_ODDS[lKey] || {}).forEach(k => {
                             if (k.includes(" vs ") && !k.includes("_")) {
