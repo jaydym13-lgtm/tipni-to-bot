@@ -889,46 +889,211 @@ async function spustFrontuPrepoctu() {
     }
 }
 
-// --- 📡 HYDRATACE A REAKTIVNÍ STREAMY ---
+// --- 📡 HYDRATACE A REAKTIVNÍ STREAMY (OPTIMALIZOVÁNO: 1× ČTENÍ MÍSTO 2×) ---
 let jeInicializovano = false;
 
 async function hydratujDataZFirestore() {
-    console.log("👥 Jednorázově načítám uživatele, tipy a zápasy z databáze do RAM...");
+    console.log("📡 INICIALIZACE: Připojuji reaktivní streamy a provádím 1x čtení dat do RAM...");
 
-    try {
-        const configDoc = await db.collection("system").doc("bot_config").get();
-        if (configDoc.exists) {
-            const data = configDoc.data() || {};
+    let resolveConfig, resolveUsers, resolveSezony;
+    const configInitPromise = new Promise(r => resolveConfig = r);
+    const usersInitPromise = new Promise(r => resolveUsers = r);
+    const sezonyInitPromise = new Promise(r => resolveSezony = r);
+    const ligyInitPromises = [];
+
+    // 1. Bot Config (Stream + Initial Snapshot)
+    let isFirstConfig = true;
+    db.collection("system").doc("bot_config").onSnapshot(doc => {
+        if (doc.exists) {
+            const data = doc.data() || {};
             RAM_BOT_CONFIG.active = data.active !== undefined ? data.active : true;
             RAM_BOT_CONFIG.liveInterval = parseInt(data.liveInterval) || 1;
             RAM_BOT_CONFIG.waitInterval = parseInt(data.waitInterval) || 10;
         }
-    } catch (e) {
-        console.error("⚠️ Nelze načíst bot_config:", e);
-    }
-
-    const usersSnap = await db.collection("users").get();
-    usersSnap.forEach(docSnap => {
-        const uid = docSnap.id;
-        const data = docSnap.data() || {};
-        const maAktivniLigu = data.leagues && SEZNAM_LIG.some(l => data.leagues.includes(l));
-        if (maAktivniLigu) {
-            RAM_USERS_PROFILES[uid] = {
-                email: (data.email || "").trim().toLowerCase(),
-                nickname: data.nickname || (data.email || "").split('@')[0],
-                leagues: data.leagues || []
-            };
+        if (isFirstConfig) {
+            isFirstConfig = false;
+            resolveConfig();
         }
+    }, err => {
+        console.error("❌ Chyba streamu ovládání bota:", err);
+        if (isFirstConfig) { isFirstConfig = false; resolveConfig(); }
     });
 
-    const sezonySnap = await db.collectionGroup("sezony").get();
-    sezonySnap.forEach(docSnap => {
-        if (docSnap.id !== SEZONA_ID) return;
-        if (!docSnap.ref.parent || !docSnap.ref.parent.parent) return;
-        const uid = docSnap.ref.parent.parent.id;
-        const sData = docSnap.data() || {};
-        RAM_USERS_TIPS[uid] = sData.souteze || {};
+    // 2. Metadata lig (Stream + Initial Snapshot)
+    SEZNAM_LIG.forEach(leagueName => {
+        let isFirstLiga = true;
+        const p = new Promise(res => {
+            db.collection("ligy").doc(leagueName).onSnapshot(docSnap => {
+                if (docSnap.exists) {
+                    RAM_LEAGUES_META[leagueName] = docSnap.data() || {};
+                }
+                if (isFirstLiga) {
+                    isFirstLiga = false;
+                    res();
+                }
+            }, err => {
+                console.error(`❌ Chyba streamu metadat ligy ${leagueName}:`, err);
+                if (isFirstLiga) { isFirstLiga = false; res(); }
+            });
+        });
+        ligyInitPromises.push(p);
     });
+
+    // 3. Uživatelé (Stream + Initial Snapshot bez duplicitního get())
+    let isFirstUsers = true;
+    db.collection("users").onSnapshot(snapshot => {
+        if (isFirstUsers) {
+            snapshot.forEach(docSnap => {
+                const uid = docSnap.id;
+                const data = docSnap.data() || {};
+                const maAktivniLigu = data.leagues && SEZNAM_LIG.some(l => data.leagues.includes(l));
+                if (maAktivniLigu) {
+                    RAM_USERS_PROFILES[uid] = {
+                        email: (data.email || "").trim().toLowerCase(),
+                        nickname: data.nickname || (data.email || "").split('@')[0],
+                        leagues: data.leagues || []
+                    };
+                }
+            });
+            isFirstUsers = false;
+            resolveUsers();
+            return;
+        }
+        if (!jeInicializovano) return;
+        snapshot.docChanges().forEach(change => {
+            const uid = change.doc.id;
+            const data = change.doc.data() || {};
+            if (change.type === "removed") {
+                delete RAM_USERS_PROFILES[uid];
+            } else {
+                const maAktivniLigu = data.leagues && SEZNAM_LIG.some(l => data.leagues.includes(l));
+                if (maAktivniLigu) {
+                    RAM_USERS_PROFILES[uid] = {
+                        email: (data.email || "").trim().toLowerCase(),
+                        nickname: data.nickname || (data.email || "").split('@')[0],
+                        leagues: data.leagues || []
+                    };
+                } else {
+                    delete RAM_USERS_PROFILES[uid];
+                }
+            }
+        });
+        planujRekonstrukciAgregatu();
+    }, err => {
+        console.error("❌ Chyba streamu uživatelů:", err);
+        if (isFirstUsers) { isFirstUsers = false; resolveUsers(); }
+    });
+
+    // 4. Sezóny a Tipy (collectionGroup stream bez duplicitního get())
+    let isFirstSezony = true;
+    db.collectionGroup("sezony").onSnapshot(snapshot => {
+        if (isFirstSezony) {
+            snapshot.forEach(docSnap => {
+                if (docSnap.id !== SEZONA_ID) return;
+                if (!docSnap.ref.parent || !docSnap.ref.parent.parent) return;
+                const uid = docSnap.ref.parent.parent.id;
+                const sData = docSnap.data() || {};
+                RAM_USERS_TIPS[uid] = sData.souteze || {};
+            });
+            isFirstSezony = false;
+            resolveSezony();
+            return;
+        }
+        if (!jeInicializovano) return;
+
+        const dotceneLigy = new Set();
+        snapshot.docChanges().forEach(change => {
+            if (change.doc.id !== SEZONA_ID) return;
+            if (!change.doc.ref.parent || !change.doc.ref.parent.parent) return;
+            const uid = change.doc.ref.parent.parent.id;
+            if (change.type === "removed") {
+                delete RAM_USERS_TIPS[uid];
+            } else {
+                const sData = change.doc.data() || {};
+                RAM_USERS_TIPS[uid] = sData.souteze || {};
+
+                Object.keys(sData.souteze || {}).forEach(lKlic => {
+                    const lName = lKlic.replace(/_/g, " ");
+                    if (SEZNAM_LIG.includes(lName)) dotceneLigy.add(lName);
+                });
+            }
+        });
+
+        if (dotceneLigy.size > 0) {
+            dotceneLigy.forEach(lName => planujRekonstrukciAgregatu(true, lName));
+        }
+    }, err => {
+        console.error("❌ Chyba streamu sezón:", err);
+        if (isFirstSezony) { isFirstSezony = false; resolveSezony(); }
+    });
+
+    // 5. Pulsní strážce (0 reads z rozpisů, poslouchá puls z R2)
+    const RAM_LAST_PULS_VERSIONS = {};
+    SEZNAM_LIG.forEach(leagueName => {
+        let isFirstPuls = true;
+        db.collection("ligy").doc(leagueName).collection("stav").doc("puls").onSnapshot(async docSnap => {
+            if (isFirstPuls) {
+                isFirstPuls = false;
+                if (docSnap.exists) {
+                    RAM_LAST_PULS_VERSIONS[leagueName] = docSnap.data()?.verzeRozpisu || 0;
+                }
+                return;
+            }
+            if (!jeInicializovano || RAM_IS_SYNCING) return;
+
+            const pData = docSnap.data() || {};
+            const serverVerze = pData.verzeRozpisu || 0;
+            const mojeVerze = RAM_LAST_PULS_VERSIONS[leagueName] || 0;
+
+            if (serverVerze > mojeVerze) {
+                RAM_LAST_PULS_VERSIONS[leagueName] = serverVerze;
+                console.log(`📡 PULS DETEKCE [${leagueName}]: Nová verze ${serverVerze} -> tahám čerstvý rozpis z R2 (0 Firestore reads)...`);
+
+                try {
+                    const ligaKlic = String(leagueName).replace(/ /g, "_");
+                    const r2Key = `sezony/${SEZONA_ID}/${ligaKlic}/rozpis.json`;
+                    const res = await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: r2Key }));
+                    const strData = await res.Body.transformToString();
+                    const json = JSON.parse(strData);
+                    if (json && json.zapasyMapa) {
+                        if (!RAM_CENTRAL_MATCHES[leagueName]) RAM_CENTRAL_MATCHES[leagueName] = {};
+                        Object.entries(json.zapasyMapa).forEach(([mId, data]) => {
+                            let isoDatum = data.datum || new Date().toISOString();
+                            const jeHotovoNeboPoVykovu = (data.apiStatus === "FINISHED") || (data.vysledek_domaci !== undefined && data.vysledek_domaci !== null) || (new Date(isoDatum) <= new Date());
+                            RAM_CENTRAL_MATCHES[leagueName][mId] = {
+                                domaci: data.domaci || "Neznámý",
+                                hoste: data.hoste || "Neznámý",
+                                datum: isoDatum,
+                                isPlayoff: data.isPlayoff !== undefined ? data.isPlayoff : false,
+                                isTopMatch: data.isTopMatch !== undefined ? data.isTopMatch : false,
+                                kolo: data.kolo || "Šampionát",
+                                vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : undefined,
+                                vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : undefined,
+                                apiStatus: data.apiStatus || "SCHEDULED",
+                                postup: data.postup || "",
+                                odds: data.odds || undefined,
+                                spyUploaded: jeHotovoNeboPoVykovu,
+                                spyR2Synced: jeHotovoNeboPoVykovu
+                            };
+                            if (data.odds) {
+                                if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
+                                RAM_CENTRAL_ODDS[leagueName][mId] = data.odds;
+                            } else if (RAM_CENTRAL_ODDS[leagueName]) {
+                                delete RAM_CENTRAL_ODDS[leagueName][mId];
+                            }
+                        });
+                        planujRekonstrukciAgregatu(false, leagueName);
+                    }
+                } catch (e) {
+                    console.error(`❌ Chyba stažení rozpisu z R2 po pulsu pro ${leagueName}:`, e.message);
+                }
+            }
+        }, err => console.error(`❌ Chyba streamu pulsu pro ${leagueName}:`, err));
+    });
+
+    // ⏳ Počkáme, až dorazí první snapshoty ze všech streamů (jediné a čisté 1× čtení!)
+    await Promise.all([configInitPromise, usersInitPromise, sezonyInitPromise, ...ligyInitPromises]);
+    console.log("👥 První snapshoty načteny do RAM bez duplicitních get() dotazů.");
 
     // ⚡ R2-FIRST HYDRATACE: Zápasy načítáme bleskově z Cloudflare R2 (0 Firestore čtení)
     for (const leagueName of SEZNAM_LIG) {
@@ -997,159 +1162,14 @@ async function hydratujDataZFirestore() {
         }
     }
 
-    // 🏛️ Jednorázové načtení metadat lig do RAM (vítěz, střelec, kanadské, hasTopMatch)
-    for (const leagueName of SEZNAM_LIG) {
-        try {
-            const lDoc = await db.collection("ligy").doc(leagueName).get();
-            if (lDoc.exists) {
-                RAM_LEAGUES_META[leagueName] = lDoc.data() || {};
-            }
-        } catch (e) {}
-    }
-
     console.log("🚀 Všechna data jsou kompletně v RAM. Provádím tichou startovní inicializaci paměti...");
     await rekonstruujAgregatyVsechny(false, true); // isStartup = true (0 falešných pulsů, 0 přepisů Síně slávy)
     jeInicializovano = true;
-    console.log("✅ Úvodní inicializace paměti hotova (0 zbytečných pulsů, 0 přepisů Síně slávy). Zapínám hlídače.");
+    console.log("✅ Úvodní inicializace paměti hotova (0 zbytečných pulsů, 0 přepisů Síně slávy). Hlídače jsou aktivní.");
 }
 
 function zapniReaktivniSluchatka() {
-    // 🏛️ Pasivní listener metadat lig (reaguje pouze pokud admin v květnu zadá celkového mistra)
-    SEZNAM_LIG.forEach(leagueName => {
-        db.collection("ligy").doc(leagueName).onSnapshot(docSnap => {
-            if (docSnap.exists) {
-                RAM_LEAGUES_META[leagueName] = docSnap.data() || {};
-            }
-        }, err => console.error(`❌ Chyba streamu metadat ligy ${leagueName}:`, err));
-    });
-
-    db.collection("system").doc("bot_config").onSnapshot(doc => {
-        if (doc.exists) {
-            const data = doc.data() || {};
-            RAM_BOT_CONFIG.active = data.active !== undefined ? data.active : true;
-            RAM_BOT_CONFIG.liveInterval = parseInt(data.liveInterval) || 1;
-            RAM_BOT_CONFIG.waitInterval = parseInt(data.waitInterval) || 10;
-        }
-    }, err => console.error("❌ Chyba streamu ovládání bota:", err));
-
-    let isFirstUsers = true;
-    db.collection("users").onSnapshot(snapshot => {
-        if (isFirstUsers) { isFirstUsers = false; return; }
-        if (!jeInicializovano) return;
-        snapshot.docChanges().forEach(change => {
-            const uid = change.doc.id;
-            const data = change.doc.data() || {};
-            if (change.type === "removed") {
-                delete RAM_USERS_PROFILES[uid];
-            } else {
-                const maAktivniLigu = data.leagues && SEZNAM_LIG.some(l => data.leagues.includes(l));
-                if (maAktivniLigu) {
-                    RAM_USERS_PROFILES[uid] = {
-                        email: (data.email || "").trim().toLowerCase(),
-                        nickname: data.nickname || (data.email || "").split('@')[0],
-                        leagues: data.leagues || []
-                    };
-                } else {
-                    delete RAM_USERS_PROFILES[uid];
-                }
-            }
-        });
-        planujRekonstrukciAgregatu();
-    }, err => console.error("❌ Chyba streamu uživatelů:", err));
-
-    let isFirstSezony = true;
-    db.collectionGroup("sezony").onSnapshot(snapshot => {
-        if (isFirstSezony) { isFirstSezony = false; return; }
-        if (!jeInicializovano) return;
-
-        const dotceneLigy = new Set();
-        snapshot.docChanges().forEach(change => {
-            if (change.doc.id !== SEZONA_ID) return;
-            if (!change.doc.ref.parent || !change.doc.ref.parent.parent) return;
-            const uid = change.doc.ref.parent.parent.id;
-            if (change.type === "removed") {
-                delete RAM_USERS_TIPS[uid];
-            } else {
-                const sData = change.doc.data() || {};
-                RAM_USERS_TIPS[uid] = sData.souteze || {};
-
-                // 🎯 Zjistíme, do kterých lig hráč reálně natipoval, a naplánujeme pouze je
-                Object.keys(sData.souteze || {}).forEach(lKlic => {
-                    const lName = lKlic.replace(/_/g, " ");
-                    if (SEZNAM_LIG.includes(lName)) dotceneLigy.add(lName);
-                });
-            }
-        });
-
-        if (dotceneLigy.size > 0) {
-            dotceneLigy.forEach(lName => planujRekonstrukciAgregatu(true, lName));
-        }
-    }, err => console.error("❌ Chyba streamu sezón:", err));
-
-    // ⚡ 0 READS PULSNÍ STRÁŽCE: Místo 1500 zápasů posloucháme jen 6 dokumentů pulsu!
-    const RAM_LAST_PULS_VERSIONS = {};
-
-    SEZNAM_LIG.forEach(leagueName => {
-        let isFirstPuls = true;
-        db.collection("ligy").doc(leagueName).collection("stav").doc("puls").onSnapshot(async docSnap => {
-            if (isFirstPuls) {
-                isFirstPuls = false;
-                if (docSnap.exists) {
-                    RAM_LAST_PULS_VERSIONS[leagueName] = docSnap.data()?.verzeRozpisu || 0;
-                }
-                return;
-            }
-            if (!jeInicializovano || RAM_IS_SYNCING) return;
-
-            const pData = docSnap.data() || {};
-            const serverVerze = pData.verzeRozpisu || 0;
-            const mojeVerze = RAM_LAST_PULS_VERSIONS[leagueName] || 0;
-
-            if (serverVerze > mojeVerze) {
-                RAM_LAST_PULS_VERSIONS[leagueName] = serverVerze;
-                console.log(`📡 PULS DETEKCE [${leagueName}]: Nová verze ${serverVerze} -> tahám čerstvý rozpis z R2 (0 Firestore reads)...`);
-
-                try {
-                    const ligaKlic = String(leagueName).replace(/ /g, "_");
-                    const r2Key = `sezony/${SEZONA_ID}/${ligaKlic}/rozpis.json`;
-                    const res = await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: r2Key }));
-                    const strData = await res.Body.transformToString();
-                    const json = JSON.parse(strData);
-                    if (json && json.zapasyMapa) {
-                        if (!RAM_CENTRAL_MATCHES[leagueName]) RAM_CENTRAL_MATCHES[leagueName] = {};
-                        Object.entries(json.zapasyMapa).forEach(([mId, data]) => {
-                            let isoDatum = data.datum || new Date().toISOString();
-                            const jeHotovoNeboPoVykovu = (data.apiStatus === "FINISHED") || (data.vysledek_domaci !== undefined && data.vysledek_domaci !== null) || (new Date(isoDatum) <= new Date());
-                            RAM_CENTRAL_MATCHES[leagueName][mId] = {
-                                domaci: data.domaci || "Neznámý",
-                                hoste: data.hoste || "Neznámý",
-                                datum: isoDatum,
-                                isPlayoff: data.isPlayoff !== undefined ? data.isPlayoff : false,
-                                isTopMatch: data.isTopMatch !== undefined ? data.isTopMatch : false,
-                                kolo: data.kolo || "Šampionát",
-                                vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : undefined,
-                                vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : undefined,
-                                apiStatus: data.apiStatus || "SCHEDULED",
-                                postup: data.postup || "",
-                                odds: data.odds || undefined,
-                                spyUploaded: jeHotovoNeboPoVykovu,
-                                spyR2Synced: jeHotovoNeboPoVykovu
-                            };
-                            if (data.odds) {
-                                if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
-                                RAM_CENTRAL_ODDS[leagueName][mId] = data.odds;
-                            } else if (RAM_CENTRAL_ODDS[leagueName]) {
-                                delete RAM_CENTRAL_ODDS[leagueName][mId];
-                            }
-                        });
-                        planujRekonstrukciAgregatu(false, leagueName);
-                    }
-                } catch (e) {
-                    console.error(`❌ Chyba stažení rozpisu z R2 po pulsu pro ${leagueName}:`, e.message);
-                }
-            }
-        }, err => console.error(`❌ Chyba streamu pulsu pro ${leagueName}:`, err));
-    });
+    // 🛡️ Zpětná kompatibilita: Všechny streamy se zapnuly a načetly rovnou v hydratujDataZFirestore()
 }
 
 // --- 📡 GLOBÁLNÍ LIVE RADAR PRO MENU A KATALOG (0 FIRESTORE READS) ---
