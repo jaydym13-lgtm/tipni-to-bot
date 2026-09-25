@@ -50,11 +50,13 @@ const r2Client = new S3Client({
 });
 const BUCKET_NAME = process.env.R2_BUCKET_NAME || "tipni-to-data";
 
-// --- 🔐 INICIALIZACE FIREBASE ADMIN SDK ---
+// --- 🔐 INICIALIZACE FIREBASE ADMIN SDK (FIRESTORE & REALTIME DATABASE) ---
 admin.initializeApp({
-    credential: admin.credential.cert("./service-account.json")
+    credential: admin.credential.cert("./service-account.json"),
+    databaseURL: "https://tipni-to-default-rtdb.europe-west1.firebasedatabase.app"
 });
 const db = admin.firestore();
+const rtdb = admin.database();
 
 // --- 🧠 IN-MEMORY RAM STATE (Stavová paměť daemona) ---
 const RAM_USERS_PROFILES = {}; 
@@ -67,6 +69,26 @@ const RAM_CENTRAL_ODDS = {};
 // 🔒 DETERMINISTICKÉ ZÁMKY A PAMĚŤ OTISKŮ (0 zbytečných pulsů a zápisů)
 let RAM_IS_SYNCING = false;
 const RAM_LAST_DATA_SIGNATURES = {};
+
+// 📡 RTDB MAJÁK & ECHO GUARD PAMĚŤ (Ochrana proti nekonečným smyčkám)
+const RAM_LAST_SENT_PULSE_TS = {};
+const RAM_LAST_PROCESSED_PULSE_TS = {};
+
+async function cinkniRtdbMajakBot(leagueName, typ = "all") {
+    try {
+        const lKlic = String(leagueName || "").replace(/ /g, "_");
+        const ts = Date.now();
+        RAM_LAST_SENT_PULSE_TS[lKlic] = ts;
+        await rtdb.ref(`system/leagues_pulse/${lKlic}`).set({
+            ts: ts,
+            source: "bot",
+            type: typ,
+            league: leagueName
+        });
+    } catch (err) {
+        console.warn(`⚠️ RTDB Maják bot varování pro ${leagueName}:`, err.message);
+    }
+}
 
 // 🏛️ RAM MEZIPAMĚŤ ŽEBŘÍČKŮ PRO GLOBÁLNÍ SÍŇ SLÁVY
 const RAM_LEAGUE_LEADERBOARDS = {};
@@ -599,7 +621,8 @@ async function aktualizujRozpisProLigu(leagueName) {
             verzeRozpisu: admin.firestore.FieldValue.increment(1),
             aktualizovano: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
-        console.log(`📡 PULS ROZPIS [${leagueName}]: Nové kurzy uloženy na R2 -> verzeRozpisu inkrementována.`);
+        await cinkniRtdbMajakBot(leagueName, "rozpis");
+        console.log(`📡 PULS ROZPIS [${leagueName}]: Nové kurzy uloženy na R2 -> RTDB maják odeslán.`);
     } catch (pulsErr) {
         console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
     }
@@ -1027,68 +1050,68 @@ async function hydratujDataZFirestore() {
         if (isFirstSezony) { isFirstSezony = false; resolveSezony(); }
     });
 
-    // 5. Pulsní strážce (0 reads z rozpisů, poslouchá puls z R2)
-    const RAM_LAST_PULS_VERSIONS = {};
+    // 5. RTDB Maják - bleskový strážce pulsu s Echo Guardem (0 Firestore reads)
     SEZNAM_LIG.forEach(leagueName => {
+        const lKlic = String(leagueName).replace(/ /g, "_");
         let isFirstPuls = true;
-        db.collection("ligy").doc(leagueName).collection("stav").doc("puls").onSnapshot(async docSnap => {
+
+        rtdb.ref(`system/leagues_pulse/${lKlic}`).on('value', async (snap) => {
+            const data = snap.val();
             if (isFirstPuls) {
                 isFirstPuls = false;
-                if (docSnap.exists) {
-                    RAM_LAST_PULS_VERSIONS[leagueName] = docSnap.data()?.verzeRozpisu || 0;
+                if (data && data.ts) {
+                    RAM_LAST_PROCESSED_PULSE_TS[lKlic] = data.ts;
                 }
                 return;
             }
-            if (!jeInicializovano || RAM_IS_SYNCING) return;
 
-            const pData = docSnap.data() || {};
-            const serverVerze = pData.verzeRozpisu || 0;
-            const mojeVerze = RAM_LAST_PULS_VERSIONS[leagueName] || 0;
+            if (!jeInicializovano || RAM_IS_SYNCING || !data || !data.ts) return;
 
-            if (serverVerze > mojeVerze) {
-                RAM_LAST_PULS_VERSIONS[leagueName] = serverVerze;
-                console.log(`📡 PULS DETEKCE [${leagueName}]: Nová verze ${serverVerze} -> tahám čerstvý rozpis z R2 (0 Firestore reads)...`);
+            // 🛡️ ECHO GUARD: Pokud signál odeslal sám bot nebo ho již zpracoval, ignorujeme (0 cyklení)
+            if (data.source === "bot") return;
+            if (RAM_LAST_PROCESSED_PULSE_TS[lKlic] && data.ts <= RAM_LAST_PROCESSED_PULSE_TS[lKlic]) return;
 
-                try {
-                    const ligaKlic = String(leagueName).replace(/ /g, "_");
-                    const r2Key = `sezony/${SEZONA_ID}/${ligaKlic}/rozpis.json`;
-                    const res = await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: r2Key }));
-                    const strData = await res.Body.transformToString();
-                    const json = JSON.parse(strData);
-                    if (json && json.zapasyMapa) {
-                        if (!RAM_CENTRAL_MATCHES[leagueName]) RAM_CENTRAL_MATCHES[leagueName] = {};
-                        Object.entries(json.zapasyMapa).forEach(([mId, data]) => {
-                            let isoDatum = data.datum || new Date().toISOString();
-                            const jeHotovoNeboPoVykovu = (data.apiStatus === "FINISHED") || (data.vysledek_domaci !== undefined && data.vysledek_domaci !== null) || (new Date(isoDatum) <= new Date());
-                            RAM_CENTRAL_MATCHES[leagueName][mId] = {
-                                domaci: data.domaci || "Neznámý",
-                                hoste: data.hoste || "Neznámý",
-                                datum: isoDatum,
-                                isPlayoff: data.isPlayoff !== undefined ? data.isPlayoff : false,
-                                isTopMatch: data.isTopMatch !== undefined ? data.isTopMatch : false,
-                                kolo: data.kolo || "Šampionát",
-                                vysledek_domaci: data.vysledek_domaci !== undefined ? data.vysledek_domaci : undefined,
-                                vysledek_hoste: data.vysledek_hoste !== undefined ? data.vysledek_hoste : undefined,
-                                apiStatus: data.apiStatus || "SCHEDULED",
-                                postup: data.postup || "",
-                                odds: data.odds || undefined,
-                                spyUploaded: jeHotovoNeboPoVykovu,
-                                spyR2Synced: jeHotovoNeboPoVykovu
-                            };
-                            if (data.odds) {
-                                if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
-                                RAM_CENTRAL_ODDS[leagueName][mId] = data.odds;
-                            } else if (RAM_CENTRAL_ODDS[leagueName]) {
-                                delete RAM_CENTRAL_ODDS[leagueName][mId];
-                            }
-                        });
-                        planujRekonstrukciAgregatu(false, leagueName);
-                    }
-                } catch (e) {
-                    console.error(`❌ Chyba stažení rozpisu z R2 po pulsu pro ${leagueName}:`, e.message);
+            RAM_LAST_PROCESSED_PULSE_TS[lKlic] = data.ts;
+            console.log(`📡 RTDB MAJÁK DETEKCE [${leagueName}]: Změna od ${data.source} (${data.type}) -> stahuji čerstvý rozpis z R2 (0 Firestore reads)...`);
+
+            try {
+                const r2Key = `sezony/${SEZONA_ID}/${lKlic}/rozpis.json`;
+                const res = await r2Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: r2Key }));
+                const strData = await res.Body.transformToString();
+                const json = JSON.parse(strData);
+                if (json && json.zapasyMapa) {
+                    if (!RAM_CENTRAL_MATCHES[leagueName]) RAM_CENTRAL_MATCHES[leagueName] = {};
+                    Object.entries(json.zapasyMapa).forEach(([mId, zData]) => {
+                        let isoDatum = zData.datum || new Date().toISOString();
+                        const jeHotovoNeboPoVykovu = (zData.apiStatus === "FINISHED") || (zData.vysledek_domaci !== undefined && zData.vysledek_domaci !== null) || (new Date(isoDatum) <= new Date());
+                        RAM_CENTRAL_MATCHES[leagueName][mId] = {
+                            domaci: zData.domaci || "Neznámý",
+                            hoste: zData.hoste || "Neznámý",
+                            datum: isoDatum,
+                            isPlayoff: zData.isPlayoff !== undefined ? zData.isPlayoff : false,
+                            isTopMatch: zData.isTopMatch !== undefined ? zData.isTopMatch : false,
+                            kolo: zData.kolo || "Šampionát",
+                            vysledek_domaci: zData.vysledek_domaci !== undefined ? zData.vysledek_domaci : undefined,
+                            vysledek_hoste: zData.vysledek_hoste !== undefined ? zData.vysledek_hoste : undefined,
+                            apiStatus: zData.apiStatus || "SCHEDULED",
+                            postup: zData.postup || "",
+                            odds: zData.odds || undefined,
+                            spyUploaded: jeHotovoNeboPoVykovu,
+                            spyR2Synced: jeHotovoNeboPoVykovu
+                        };
+                        if (zData.odds) {
+                            if (!RAM_CENTRAL_ODDS[leagueName]) RAM_CENTRAL_ODDS[leagueName] = {};
+                            RAM_CENTRAL_ODDS[leagueName][mId] = zData.odds;
+                        } else if (RAM_CENTRAL_ODDS[leagueName]) {
+                            delete RAM_CENTRAL_ODDS[leagueName][mId];
+                        }
+                    });
+                    planujRekonstrukciAgregatu(false, leagueName);
                 }
+            } catch (e) {
+                console.error(`❌ Chyba stažení rozpisu z R2 po RTDB majáku pro ${leagueName}:`, e.message);
             }
-        }, err => console.error(`❌ Chyba streamu pulsu pro ${leagueName}:`, err));
+        });
     });
 
     // ⏳ Počkáme, až dorazí první snapshoty ze všech streamů (jediné a čisté 1× čtení!)
@@ -3177,7 +3200,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
                 verzeZebricku: admin.firestore.FieldValue.increment(1),
                 aktualizovano: admin.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
-            console.log(`📡 PULS SYNC [${leagueName}]: R2 aktualizováno -> Firestore puls inkrementován.`);
+            await cinkniRtdbMajakBot(leagueName, "all");
+            console.log(`📡 PULS SYNC [${leagueName}]: R2 aktualizováno -> RTDB maják odeslán.`);
         } catch (pulsErr) {
             console.error(`❌ Selhal zápis pulsu pro ${leagueName}:`, pulsErr);
         }
