@@ -12,6 +12,7 @@ import { PRAVIDLA_LIG } from "./rules.js";
 const SEZONA_ID = process.env.SEZONA_ID || "2026_2027";
 const PORT = process.env.PORT || 8080;
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || "";
+const BOT_SECRET = process.env.BOT_SECRET || "";
 
 // 🗺️ ČÍSELNÍK SOUTĚŽÍ PRO SPORTAPI7 (SOFASCORE DATA ENGINE)
 const SOFASCORE_TOURNAMENTS = {
@@ -4279,6 +4280,17 @@ async function startEnterpriseApplication() {
     // 🌐 OTEVŘENÍ SÍTĚ AŽ PO 100% NAČTENÍ DAT DO RAM (Garantuje, že /sync-odds nemine načtené zápasy)
     http.createServer((req, res) => {
         const url = req.url || "/";
+
+        // 🔒 AUTORIZACE POŽADAVKŮ: Ochrana endpointů tajným tokenem
+        const incomingSecret = req.headers["x-bot-secret"];
+        const isPublicPing = (url === "/" || url === "/cron" || url.startsWith("/cron"));
+
+        if (!isPublicPing && BOT_SECRET && incomingSecret !== BOT_SECRET) {
+            console.warn(`🛑 NEOPRÁVNĚNÝ PŘÍSTUP [${req.method} ${url}]: Chybí nebo nesouhlasí x-bot-secret!`);
+            res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("Unauthorized: Chybějící nebo neplatný bezpečnostní token.");
+            return;
+        }
 
         if (url === "/cron" || url.startsWith("/cron")) {
             // 🛡️ Tichý Keep-Alive signál: Pouze zresetuje usínací časovač Renderu (0 API dotazů)
