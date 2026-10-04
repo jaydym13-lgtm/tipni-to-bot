@@ -4281,8 +4281,10 @@ async function startEnterpriseApplication() {
     http.createServer((req, res) => {
         const url = req.url || "/";
 
-        // 🔒 AUTORIZACE POŽADAVKŮ: Ochrana endpointů tajným tokenem
-        const incomingSecret = req.headers["x-bot-secret"];
+        // 🔒 AUTORIZACE POŽADAVKŮ: Ochrana endpointů tajným tokenem (hlavička nebo ?key=...)
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        const paramSecret = urlObj.searchParams.get("key");
+        const incomingSecret = req.headers["x-bot-secret"] || paramSecret;
         const isPublicPing = (url === "/" || url === "/cron" || url.startsWith("/cron"));
 
         if (!isPublicPing && BOT_SECRET && incomingSecret !== BOT_SECRET) {
