@@ -599,6 +599,7 @@ async function aktualizujRozpisProLigu(leagueName) {
 
         zapasyMapaObohacena[mId] = {
             ...z,
+            postup: (z.apiStatus === "FINISHED") ? (z.postup || "") : "",
             odds: matchOdds,
             oddsChecked: bylDenZpracovan,
             forma: {
@@ -2193,13 +2194,14 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
             if (jeLiveNeboVyhodnoceny) {
                 let bodyZapasuLive = 0;
                 if (uTip) {
-                    bodyZapasuLive = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, vDomaci, vHoste, uTip.postup, zapas.postup, zapas.isPlayoff, zapas.isTopMatch, leagueName);
+                    const realnyPostupLive = (zapas.apiStatus === "FINISHED") ? (zapas.postup || "") : "";
+                    bodyZapasuLive = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, vDomaci, vHoste, uTip.postup, realnyPostupLive, zapas.isPlayoff, zapas.isTopMatch, leagueName);
                     zebricekMapa[uid].celkemBoduLive += bodyZapasuLive; zebricekMapa[uid].natipovaneVyhodnoceneLive++;
                     
                     const tD = parseInt(uTip.tip_domaci); const tH = parseInt(uTip.tip_hoste);
                     const rDLive = parseInt(vDomaci); const rHLive = parseInt(vHoste);
 
-                    const jePresnyLive = tD === rDLive && tH === rHLive && (!zapas.isPlayoff || rDLive !== rHLive || uTip.postup === zapas.postup);
+                    const jePresnyLive = tD === rDLive && tH === rHLive && (!zapas.isPlayoff || rDLive !== rHLive || uTip.postup === realnyPostupLive);
                     const jeTendenceLive = (tD > tH && rDLive > rHLive) || (tD < tH && rDLive < rHLive) || (tD === tH && rDLive === rHLive);
 
                     if (jePresnyLive) {
@@ -2889,7 +2891,8 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
             const rD = parseInt(z.vysledek_domaci !== undefined ? z.vysledek_domaci : 0, 10);
             const rH = parseInt(z.vysledek_hoste !== undefined ? z.vysledek_hoste : 0, 10);
 
-            const isExact = (tD === rD && tH === rH && (!z.isPlayoff || rD !== rH || tip.postup === z.postup));
+            const effPostup = (z.apiStatus === "FINISHED") ? (z.postup || "") : "";
+            const isExact = (tD === rD && tH === rH && (!z.isPlayoff || rD !== rH || tip.postup === effPostup));
             const tipDiff = tD - tH;
             const realDiff = rD - rH;
             const isTend = (tipDiff > 0 && realDiff > 0) || (tipDiff < 0 && realDiff < 0) || (tipDiff === 0 && realDiff === 0);
@@ -3149,6 +3152,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
 
         zapasyMapaObohacena[mId] = {
             ...z,
+            postup: (z.apiStatus === "FINISHED") ? (z.postup || "") : "",
             odds: matchOdds,
             oddsChecked: bylDenZpracovan,
             forma: {
@@ -3563,7 +3567,7 @@ async function providniApiHeartbeat() {
 
                 let golyDomaci = stary.vysledek_domaci !== undefined ? stary.vysledek_domaci : 0;
                 let golyHoste = stary.vysledek_hoste !== undefined ? stary.vysledek_hoste : 0;
-                let novyPostup = stary.postup || "";
+                let novyPostup = "";
 
                 const rawH = liveItem.homeTeam?.name || "";
                 const normH = PL_NORM(slovnikTymu[rawH] || rawH);
@@ -3602,10 +3606,14 @@ async function providniApiHeartbeat() {
                     } else {
                         golyDomaci = hScore.current;
                         golyHoste = aScore.current;
+                        novyPostup = "";
                     }
                 }
 
                 let novyStatus = isFinished ? "FINISHED" : "IN_PLAY";
+                if (!isFinished) {
+                    novyPostup = "";
+                }
 
                 const skoreSeZmenilo = (stary.vysledek_domaci !== golyDomaci) || (stary.vysledek_hoste !== golyHoste);
                 const statusSeZmenil = (stary.apiStatus !== novyStatus);
