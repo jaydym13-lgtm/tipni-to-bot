@@ -2729,6 +2729,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         }
 
         kolaSouhrn[klicKola] = {
+            isFinished: dohranaKolaSet.has(klicKola),
             hracKola: hraciKolaObj,
             topMatch: topMatchObj,
             nejvicPresnych: nejvicPresnychObj
