@@ -1232,7 +1232,7 @@ async function generujHallOfFameR2() {
         if (!lb || !lb.zebricek) return;
 
         lb.zebricek.forEach(p => {
-            if (!p.uid || !p.futCard) return;
+            if (!p.uid || !p.tiperCard) return;
             const odehrano = (p.natipovaneVyhodnocene || 0) + (p.nenatipovaneVyhodnocene || 0);
             if (odehrano === 0) return;
 
@@ -1245,14 +1245,14 @@ async function generujHallOfFameR2() {
             }
             playersMap[p.uid].leaguesCards.push({
                 leagueName: lName,
-                futCard: p.futCard
+                tiperCard: p.tiperCard
             });
         });
     });
 
     const playersList = Object.values(playersMap).map(p => {
         const count = p.leaguesCards.length;
-        const sumOvr = p.leaguesCards.reduce((acc, c) => acc + (c.futCard.ovr || 0), 0);
+        const sumOvr = p.leaguesCards.reduce((acc, c) => acc + (c.tiperCard.ovr || 0), 0);
         const rawAvg = sumOvr / count;
 
         // 🎯 KOEFICIENT VŠESTRANNOSTI (ZÁBĚROVÝ NÁSOBIČ PODLE POČTU HRANÝCH LIG)
@@ -1272,27 +1272,27 @@ async function generujHallOfFameR2() {
         let sumAvgPts = 0;
 
         p.leaguesCards.forEach(c => {
-            const fc = c.futCard;
-            if ((fc.ovr || 0) > maxOvr) {
-                maxOvr = fc.ovr;
+            const tc = c.tiperCard;
+            if ((tc.ovr || 0) > maxOvr) {
+                maxOvr = tc.ovr;
                 bestLeague = c.leagueName;
             }
-            sumPre += (fc.stats?.pre || 60);
-            sumOdv += (fc.stats?.odv || 60);
-            sumClu += (fc.stats?.clu || 60);
-            sumSta += (fc.stats?.sta || 60);
-            sumFor += (fc.stats?.for || 60);
-            sumEfe += (fc.stats?.efe || 60);
+            sumPre += (tc.stats?.pre || 60);
+            sumOdv += (tc.stats?.odv || 60);
+            sumClu += (tc.stats?.clu || 60);
+            sumSta += (tc.stats?.sta || 60);
+            sumFor += (tc.stats?.for || 60);
+            sumEfe += (tc.stats?.efe || 60);
 
-            if ((fc.badges?.streaks || 0) > maxStreak) maxStreak = fc.badges.streaks;
-            sumExacts += (fc.badges?.exacts || 0);
-            sumDraws += (fc.badges?.draws || 0);
-            if ((fc.badges?.maxRound || 0) > maxRound) maxRound = fc.badges.maxRound;
-            sumMatches += (fc.backSide?.totalMatches || 0);
-            sumAvgPts += parseFloat(fc.backSide?.avgRoundPts || 0) || 0;
+            if ((tc.badges?.streaks || 0) > maxStreak) maxStreak = tc.badges.streaks;
+            sumExacts += (tc.badges?.exacts || 0);
+            sumDraws += (tc.badges?.draws || 0);
+            if ((tc.badges?.maxRound || 0) > maxRound) maxRound = tc.badges.maxRound;
+            sumMatches += (tc.backSide?.totalMatches || 0);
+            sumAvgPts += parseFloat(tc.backSide?.avgRoundPts || 0) || 0;
         });
 
-        const bestCard = p.leaguesCards.find(c => c.leagueName === bestLeague)?.futCard || p.leaguesCards[0].futCard;
+        const bestCard = p.leaguesCards.find(c => c.leagueName === bestLeague)?.tiperCard || p.leaguesCards[0].tiperCard;
 
         let tier = 'bronze';
         if (masterOvr >= 90) tier = 'elite';
@@ -1341,17 +1341,17 @@ async function generujHallOfFameR2() {
 
         const leaguePlayers = [];
         lb.zebricek.forEach(p => {
-            if (!p.uid || !p.futCard) return;
+            if (!p.uid || !p.tiperCard) return;
             const odehrano = (p.natipovaneVyhodnocene || 0) + (p.nenatipovaneVyhodnocene || 0);
             if (odehrano === 0) return;
 
             leaguePlayers.push({
                 uid: p.uid,
                 nickname: p.nickname || 'Hráč',
-                ovr: p.futCard.ovr || 60,
-                tier: p.futCard.tier || 'bronze',
-                archetype: p.futCard.archetype || 'TAK',
-                archetypeName: p.futCard.archetypeName || 'Taktik',
+                ovr: p.tiperCard.ovr || 60,
+                tier: p.tiperCard.tier || 'bronze',
+                archetype: p.tiperCard.archetype || 'TAK',
+                archetypeName: p.tiperCard.archetypeName || 'Taktik',
                 points: p.celkemBodu || 0,
                 matches: odehrano
             });
@@ -2733,7 +2733,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         };
     });
 
-    // 🃏 FUT-STYLE HRÁČSKÉ KARTY: ANALYTICKÝ MODEL REALITA VS. MAXIMUM (0–99)
+    // 🃏 TIPÉRSKÉ KARTY: ANALYTICKÝ MODEL REALITA VS. MAXIMUM (0–99)
     const odehraneZapasyChronoBot = Object.entries(centralMatches)
         .map(([id, z]) => ({ ...z, id, matchId: id }))
         .filter(z => z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED")
@@ -2801,7 +2801,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         return count > 0 ? (sum / count) : 0;
     };
 
-    const spoctiFUTKartuBot = (uid, isLiveMode = false) => {
+    const spoctiTiperKartuBot = (uid, isLiveMode = false) => {
         const stats = zebricekMapa[uid] || {};
         const uSouteze = RAM_USERS_TIPS[uid] || {};
         const uSoutezData = uSouteze[ligaKlic] || {};
@@ -3087,12 +3087,12 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         };
     };
 
-    // 🎴 Obohacení žebříčků v bot.mjs o karty
+    // 🎴 Obohacení žebříčků v bot.mjs o karty tipéra
     zebricekPole.forEach(p => {
-        p.futCard = spoctiFUTKartuBot(p.uid, false);
+        p.tiperCard = spoctiTiperKartuBot(p.uid, false);
     });
     zebricekLivePole.forEach(p => {
-        p.futCard = spoctiFUTKartuBot(p.uid, true);
+        p.tiperCard = spoctiTiperKartuBot(p.uid, true);
     });
 
     const leaderboardJson = {
