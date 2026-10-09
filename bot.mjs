@@ -4401,6 +4401,19 @@ async function startEnterpriseApplication() {
             return;
         }
 
+        // ⚡ RECALCULATE ENDPOINT: Cílený přepočet konkrétní ligy (nebo all) na vyžádání
+        if (url === "/recalculate" || url.startsWith("/recalculate")) {
+            const leagueParam = urlObj.searchParams.get("league");
+            const targetLeague = (leagueParam && leagueParam.toLowerCase() !== "all") ? leagueParam : null;
+
+            console.log(`⚡ SERVISNÍ PING (/recalculate): Požadavek na přepočet [${targetLeague || "VŠECHNY LIGY"}]...`);
+            planujRekonstrukciAgregatu(true, targetLeague);
+
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end(`OK - Přepočet pro [${targetLeague || "všechny ligy"}] byl zařazen do fronty bota.`);
+            return;
+        }
+
         if (url === "/sync-event-map" || url.startsWith("/sync-event-map")) {
             console.log(`🗺️ SERVISNÍ PING (/sync-event-map): Spouštím měsíční generování mapy ID...`);
             synchronizujSofaScoreEventMap().catch(err => console.error("❌ Chyba mapování:", err));
