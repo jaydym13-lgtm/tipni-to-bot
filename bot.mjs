@@ -4289,21 +4289,28 @@ async function startEnterpriseApplication() {
     // 🌐 OTEVŘENÍ SÍTĚ AŽ PO 100% NAČTENÍ DAT DO RAM (Garantuje, že /sync-odds nemine načtené zápasy)
     http.createServer((req, res) => {
         const url = req.url || "/";
+        const urlObj = new URL(url, `http://${req.headers.host || 'localhost'}`);
+        const pathname = urlObj.pathname;
 
-        // 🔒 AUTORIZACE POŽADAVKŮ: Ochrana endpointů tajným tokenem (hlavička nebo ?key=...)
-        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-        const paramSecret = urlObj.searchParams.get("key");
-        const incomingSecret = req.headers["x-bot-secret"] || paramSecret;
-        const isPublicPing = (url === "/" || url === "/cron" || url.startsWith("/cron"));
+        // 🌐 BROWSER PROBES: Headless API neobsluhuje ikony ani roboty -> RFC 204 No Content bez šumu v logách
+        if (pathname === "/favicon.ico" || pathname === "/robots.txt") {
+            res.writeHead(204);
+            res.end();
+            return;
+        }
 
-        if (!isPublicPing && BOT_SECRET && incomingSecret !== BOT_SECRET) {
-            console.warn(`🛑 NEOPRÁVNĚNÝ PŘÍSTUP [${req.method} ${url}]: Chybí nebo nesouhlasí x-bot-secret!`);
+        // 🔒 AUTORIZACE POŽADAVKŮ: Ochrana privátních endpointů tokenem (hlavička x-bot-secret nebo ?key=...)
+        const incomingSecret = req.headers["x-bot-secret"] || urlObj.searchParams.get("key");
+        const isPublicRoute = (pathname === "/" || pathname === "/cron");
+
+        if (!isPublicRoute && BOT_SECRET && incomingSecret !== BOT_SECRET) {
+            console.warn(`🛑 NEOPRÁVNĚNÝ PŘÍSTUP [${req.method} ${pathname}]: Chybí nebo nesouhlasí x-bot-secret!`);
             res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
             res.end("Unauthorized: Chybějící nebo neplatný bezpečnostní token.");
             return;
         }
 
-        if (url === "/cron" || url.startsWith("/cron")) {
+        if (pathname === "/cron") {
             // 🛡️ Tichý Keep-Alive signál: Pouze zresetuje usínací časovač Renderu (0 API dotazů)
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
             res.end("OK - Keep-alive aktivní.");
