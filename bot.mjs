@@ -70,6 +70,7 @@ const RAM_CENTRAL_ODDS = {};
 // 🔒 DETERMINISTICKÉ ZÁMKY A PAMĚŤ OTISKŮ (0 zbytečných pulsů a zápisů)
 let RAM_IS_SYNCING = false;
 const RAM_LAST_DATA_SIGNATURES = {};
+const RAM_LAST_SPY_SIGNATURES = {}; 
 
 // 📡 RTDB MAJÁK & ECHO GUARD PAMĚŤ (Ochrana proti nekonečným smyčkám)
 const RAM_LAST_SENT_PULSE_TS = {};
@@ -3236,37 +3237,38 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         Object.keys(centralMatches).forEach(mId => {
             const zapas = centralMatches[mId];
             const jeOdemceny = zapas && (new Date(zapas.datum) <= new Date() || zapas.vysledek_domaci !== undefined || zapas.apiStatus === "IN_PLAY" || zapas.apiStatus === "FINISHED");
-            const jeLive = zapas && (zapas.apiStatus === "IN_PLAY" || zapas.apiStatus === "PAUSED");
-            const potrebujeUpload = jeOdemceny && (jeLive || !zapas.spyR2Synced);
+            if (!jeOdemceny) return;
 
-            if (potrebujeUpload) {
-                const tipyProZapasPole = [];
-                Object.keys(RAM_USERS_PROFILES).forEach(uid => {
-                    const p = RAM_USERS_PROFILES[uid];
-                    if (!p.leagues || !p.leagues.includes(leagueName)) return;
+            const tipyProZapasPole = [];
+            Object.keys(RAM_USERS_PROFILES).forEach(uid => {
+                const p = RAM_USERS_PROFILES[uid];
+                if (!p.leagues || !p.leagues.includes(leagueName)) return;
 
-                    const uSouteze = RAM_USERS_TIPS[uid] || {};
-                    const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
-                    const uTip = uTips[mId];
+                const uSouteze = RAM_USERS_TIPS[uid] || {};
+                const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
+                const uTip = uTips[mId];
 
-                    if (uTip && uTip.tip_domaci !== undefined && uTip.tip_domaci !== null && String(uTip.tip_domaci).trim() !== '') {
-                        tipyProZapasPole.push({
-                            uid: uid,
-                            userEmail: p.email,
-                            nickname: p.nickname,
-                            tip_domaci: parseInt(uTip.tip_domaci),
-                            tip_hoste: parseInt(uTip.tip_hoste),
-                            postup: uTip.postup || ''
-                        });
-                    }
-                });
+                if (uTip && uTip.tip_domaci !== undefined && uTip.tip_domaci !== null && String(uTip.tip_domaci).trim() !== '') {
+                    tipyProZapasPole.push({
+                        uid: uid,
+                        userEmail: p.email,
+                        nickname: p.nickname,
+                        tip_domaci: parseInt(uTip.tip_domaci),
+                        tip_hoste: parseInt(uTip.tip_hoste),
+                        postup: uTip.postup || ''
+                    });
+                }
+            });
 
+            // 🕵️ DETEKCE ZMĚN TIPŮ: Porovnáme obsahový otisk tipů pro tento zápas
+            const spySignature = tipyProZapasPole.map(t => `${t.uid}:${t.tip_domaci}_${t.tip_hoste}_${t.postup}`).sort().join('|');
+            const jeZmenaVipech = (RAM_LAST_SPY_SIGNATURES[mId] !== spySignature);
+
+            if (jeZmenaVipech) {
+                RAM_LAST_SPY_SIGNATURES[mId] = spySignature;
                 const spyJson = { tipy: tipyProZapasPole, aktualizovano: timestampNow };
                 uploadTasks.push(async () => {
                     await uploadToR2(leagueName, `spy_zapas_${mId}.json`, spyJson);
-                    if (!jeLive && zapas.apiStatus === "FINISHED") {
-                        zapas.spyR2Synced = true;
-                    }
                 });
             }
         });
@@ -4414,6 +4416,13 @@ async function startEnterpriseApplication() {
             const targetLeague = (leagueParam && leagueParam.toLowerCase() !== "all") ? leagueParam : null;
 
             console.log(`⚡ SERVISNÍ PING (/recalculate): Požadavek na přepočet [${targetLeague || "VŠECHNY LIGY"}]...`);
+            // 🧹 RESET PAMĚTI ŠPEHA: Vynutí kontrolu a zpětné dopsání všech chybějících tipů na R2
+            const ligyKResetu = targetLeague ? [targetLeague] : SEZNAM_LIG;
+            ligyKResetu.forEach(lName => {
+                const zMap = RAM_CENTRAL_MATCHES[lName] || {};
+                Object.keys(zMap).forEach(mId => delete RAM_LAST_SPY_SIGNATURES[mId]);
+            });
+
             planujRekonstrukciAgregatu(true, targetLeague);
 
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
