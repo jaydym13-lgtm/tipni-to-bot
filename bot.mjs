@@ -63,6 +63,7 @@ const rtdb = admin.database();
 const RAM_USERS_PROFILES = {}; 
 const RAM_USERS_TIPS = {};     
 const RAM_CENTRAL_MATCHES = {}; 
+const RAM_GROUPS = {}; // 👥 RAM MEZIPAMĚŤ PRO SOUKROMÉ SKUPINY A MINILIGY 
 
 // 📊 RAM MEZIPAMĚŤ KURZŮ (1-X-2)
 const RAM_CENTRAL_ODDS = {};
@@ -921,10 +922,11 @@ let jeInicializovano = false;
 async function hydratujDataZFirestore() {
     console.log("📡 INICIALIZACE: Připojuji reaktivní streamy a provádím 1x čtení dat do RAM...");
 
-    let resolveConfig, resolveUsers, resolveSezony;
+    let resolveConfig, resolveUsers, resolveSezony, resolveGroups;
     const configInitPromise = new Promise(r => resolveConfig = r);
     const usersInitPromise = new Promise(r => resolveUsers = r);
     const sezonyInitPromise = new Promise(r => resolveSezony = r);
+    const groupsInitPromise = new Promise(r => resolveGroups = r);
     const ligyInitPromises = [];
 
     // 1. Bot Config (Stream + Initial Snapshot)
@@ -1053,6 +1055,29 @@ async function hydratujDataZFirestore() {
         if (isFirstSezony) { isFirstSezony = false; resolveSezony(); }
     });
 
+    // 4b. Soukromé skupiny & party (Stream bez čtení z Firestore navíc)
+    let isFirstGroups = true;
+    db.collection("skupiny").where("sezonaId", "==", SEZONA_ID).onSnapshot(snapshot => {
+      snapshot.docChanges().forEach(change => {
+        const gId = change.doc.id;
+        if (change.type === "removed") {
+          delete RAM_GROUPS[gId];
+        } else {
+          RAM_GROUPS[gId] = { id: gId, ...change.doc.data() };
+        }
+      });
+      if (isFirstGroups) {
+        isFirstGroups = false;
+        resolveGroups();
+        return;
+      }
+      if (!jeInicializovano) return;
+      planujRekonstrukciAgregatu();
+    }, err => {
+      console.error("❌ Chyba streamu skupin:", err);
+      if (isFirstGroups) { isFirstGroups = false; resolveGroups(); }
+    });
+
     // 5. RTDB Maják - bleskový strážce pulsu s Echo Guardem (0 Firestore reads)
     SEZNAM_LIG.forEach(leagueName => {
         const lKlic = String(leagueName).replace(/ /g, "_");
@@ -1118,7 +1143,7 @@ async function hydratujDataZFirestore() {
     });
 
     // ⏳ Počkáme, až dorazí první snapshoty ze všech streamů (jediné a čisté 1× čtení!)
-    await Promise.all([configInitPromise, usersInitPromise, sezonyInitPromise, ...ligyInitPromises]);
+    await Promise.all([configInitPromise, usersInitPromise, sezonyInitPromise, groupsInitPromise, ...ligyInitPromises]);
     console.log("👥 První snapshoty načteny do RAM bez duplicitních get() dotazů.");
 
     // ⚡ R2-FIRST HYDRATACE: Zápasy načítáme bleskově z Cloudflare R2 (0 Firestore čtení)
@@ -2054,14 +2079,97 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         };
 }
 
+// 👥 AUTONOMNÍ GENERÁTOR ŽEBŘÍČKŮ SOUKROMÝCH SKUPIN NA CLOUDFLARE R2
+async function generujSkupinyProLigu(leagueName, zebricekPole, zebricekLivePole, timestampNow) {
+  const aktivniSkupiny = Object.values(RAM_GROUPS).filter(g => g.liga === leagueName && g.status === "ACTIVE");
+  if (aktivniSkupiny.length === 0) return;
+
+  for (const grp of aktivniSkupiny) {
+    const clenoveSet = new Set(grp.clenove || []);
+    const grpZebricek = zebricekPole.filter(p => clenoveSet.has(p.uid));
+    const grpZebricekLive = zebricekLivePole.filter(p => clenoveSet.has(p.uid)).map(p => ({ ...p }));
+
+    grpZebricekLive.forEach((pLive, idxLive) => {
+      const idxOfficial = grpZebricek.findIndex(pOff => pOff.uid === pLive.uid);
+      pLive.poziceDelta = idxOfficial !== -1 ? (idxOfficial - idxLive) : 0;
+    });
+
+    const grpMapaPrezdivek = {};
+    grpZebricek.forEach(p => {
+      if (p.email) grpMapaPrezdivek[p.email] = p.nickname;
+      if (p.uid) grpMapaPrezdivek[p.uid] = p.nickname;
+    });
+
+    const groupJson = {
+      skupina: {
+        id: grp.id,
+        kod: grp.kod || grp.id,
+        nazev: grp.nazev,
+        liga: grp.liga,
+        autorUid: grp.autorUid,
+        pocetClenu: grpZebricek.length
+      },
+      zebricek: grpZebricek,
+      zebricekLive: grpZebricekLive,
+      mapaPrezdivek: grpMapaPrezdivek,
+      isLive: zebricekLivePole.length > 0 && grpZebricekLive.some(p => p.celkemBoduLive !== p.celkemBodu),
+      aktualizovano: timestampNow
+    };
+
+    await uploadToR2(leagueName, `skupiny/${grp.id}.json`, groupJson);
+  }
+  console.log(`👥 R2 SKUPINY [${leagueName}]: Úspěšně vygenerováno ${aktivniSkupiny.length} žebříčků part.`);
+}
+
+// 🛡️ GILOTINA BOTA: Kontrola a tvrdý výmaz neúplných part (<10) po výkopu sezóny
+async function zkontrolujGilotinuSkupinBot(leagueName) {
+  const ligaMeta = RAM_LEAGUES_META[leagueName] || {};
+  let zacatekMs = 0;
+  if (ligaMeta.zacatek) {
+    const z = ligaMeta.zacatek;
+    zacatekMs = z.toDate ? z.toDate().getTime() : (z.seconds ? z.seconds * 1000 : new Date(z).getTime());
+  }
+  if (!zacatekMs || Date.now() < zacatekMs) return;
+
+  const pendingSkupiny = Object.values(RAM_GROUPS).filter(g => g.liga === leagueName && g.status === "PENDING");
+  if (pendingSkupiny.length === 0) return;
+
+  console.log(`🧹 GILOTINA BOTA [${leagueName}]: Kontroluji ${pendingSkupiny.length} čekajících skupin...`);
+  const batch = db.batch();
+  let zmena = false;
+
+  for (const grp of pendingSkupiny) {
+    const docRef = db.collection("skupiny").doc(grp.id);
+    const clenove = Array.isArray(grp.clenove) ? grp.clenove : [];
+    if (clenove.length >= 10) {
+      batch.update(docRef, {
+        status: "ACTIVE",
+        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+      });
+      zmena = true;
+      console.log(`✅ GILOTINA BOTA: Skupina "${grp.nazev}" (${grp.id}) aktivována (${clenove.length} členů).`);
+    } else {
+      batch.delete(docRef);
+      zmena = true;
+      console.log(`🗑️ GILOTINA BOTA: Skupina "${grp.nazev}" (${grp.id}) tvrdě smazána (pouze ${clenove.length} členů).`);
+    }
+  }
+
+  if (zmena) {
+    await batch.commit().catch(e => console.error("❌ Chyba gilotiny bota:", e.message));
+  }
+}
+
 async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false, isStartup = false) {
-    const ligaKlic = String(leagueName).replace(/ /g, "_");
-    const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
+  const ligaKlic = String(leagueName).replace(/ /g, "_");
+  const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
 
-    // ⚡ 0 FIRESTORE READS: Čteme metadata z RAM paměti
-    const realLeagueData = RAM_LEAGUES_META[leagueName] || null;
+  // ⚡ 0 FIRESTORE READS: Čteme metadata z RAM paměti
+  const realLeagueData = RAM_LEAGUES_META[leagueName] || null;
 
-    await autoGenerujTopZapasyProLigu(leagueName, realLeagueData);
+  await autoGenerujTopZapasyProLigu(leagueName, realLeagueData);
+  await zkontrolujGilotinuSkupinBot(leagueName);
 
     const zebricekMapa = {};
     const mapaPrezdivek = {};
@@ -3199,6 +3307,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         await uploadToR2(leagueName, "leaderboard.json", leaderboardJson);
         await uploadToR2(leagueName, "rozpis.json", rozpisJson);
         await rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches);
+        await generujSkupinyProLigu(leagueName, zebricekPole, zebricekLivePole, timestampNow);
 
         try {
             const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
