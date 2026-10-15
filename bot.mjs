@@ -1055,15 +1055,16 @@ async function hydratujDataZFirestore() {
         if (isFirstSezony) { isFirstSezony = false; resolveSezony(); }
     });
 
-    // 4b. Soukromé skupiny & party (Stream bez čtení z Firestore navíc)
+    // 4b. Soukromé skupiny & party přes Realtime Database (0 Firestore reads)
     let isFirstGroups = true;
-    db.collection("skupiny").where("sezonaId", "==", SEZONA_ID).onSnapshot(snapshot => {
-      snapshot.docChanges().forEach(change => {
-        const gId = change.doc.id;
-        if (change.type === "removed") {
-          delete RAM_GROUPS[gId];
-        } else {
-          RAM_GROUPS[gId] = { id: gId, ...change.doc.data() };
+    rtdb.ref(`skupiny/${SEZONA_ID}`).on("value", (snap) => {
+      const allLeaguesGroups = snap.val() || {};
+      for (const k in RAM_GROUPS) delete RAM_GROUPS[k];
+      Object.values(allLeaguesGroups).forEach(ligaObj => {
+        if (ligaObj && typeof ligaObj === "object") {
+          Object.entries(ligaObj).forEach(([gId, gData]) => {
+            RAM_GROUPS[gId] = { id: gId, ...gData };
+          });
         }
       });
       if (isFirstGroups) {
@@ -1073,8 +1074,8 @@ async function hydratujDataZFirestore() {
       }
       if (!jeInicializovano) return;
       planujRekonstrukciAgregatu();
-    }, err => {
-      console.error("❌ Chyba streamu skupin:", err);
+    }, (err) => {
+      console.error("❌ Chyba RTDB streamu skupin:", err);
       if (isFirstGroups) { isFirstGroups = false; resolveGroups(); }
     });
 
@@ -2134,30 +2135,23 @@ async function zkontrolujGilotinuSkupinBot(leagueName) {
   const pendingSkupiny = Object.values(RAM_GROUPS).filter(g => g.liga === leagueName && g.status === "PENDING");
   if (pendingSkupiny.length === 0) return;
 
-  console.log(`🧹 GILOTINA BOTA [${leagueName}]: Kontroluji ${pendingSkupiny.length} čekajících skupin...`);
-  const batch = db.batch();
-  let zmena = false;
+  console.log(`🧹 GILOTINA BOTA [${leagueName}]: Kontroluji ${pendingSkupiny.length} čekajících skupin v RTDB...`);
+  const ligaKlic = String(leagueName).replace(/ /g, "_");
 
   for (const grp of pendingSkupiny) {
-    const docRef = db.collection("skupiny").doc(grp.id);
+    const grpRef = rtdb.ref(`skupiny/${SEZONA_ID}/${ligaKlic}/${grp.id}`);
     const clenove = Array.isArray(grp.clenove) ? grp.clenove : [];
     if (clenove.length >= 10) {
-      batch.update(docRef, {
+      await grpRef.update({
         status: "ACTIVE",
-        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        aktualizovano: admin.firestore.FieldValue.serverTimestamp()
+        activatedAt: Date.now(),
+        aktualizovano: Date.now()
       });
-      zmena = true;
       console.log(`✅ GILOTINA BOTA: Skupina "${grp.nazev}" (${grp.id}) aktivována (${clenove.length} členů).`);
     } else {
-      batch.delete(docRef);
-      zmena = true;
+      await grpRef.remove();
       console.log(`🗑️ GILOTINA BOTA: Skupina "${grp.nazev}" (${grp.id}) tvrdě smazána (pouze ${clenove.length} členů).`);
     }
-  }
-
-  if (zmena) {
-    await batch.commit().catch(e => console.error("❌ Chyba gilotiny bota:", e.message));
   }
 }
 
