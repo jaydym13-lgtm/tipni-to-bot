@@ -2080,10 +2080,13 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
         };
 }
 
-// 👥 AUTONOMNÍ GENERÁTOR ŽEBŘÍČKŮ SOUKROMÝCH SKUPIN NA CLOUDFLARE R2
-async function generujSkupinyProLigu(leagueName, zebricekPole, zebricekLivePole, timestampNow) {
+// 👥 AUTONOMNÍ GENERÁTOR ŽEBŘÍČKŮ SOUKROMÝCH SKUPIN NA CLOUDFLARE R2 (VČETNĚ LOKÁLNÍCH STATISTIK A RADARU)
+async function generujSkupinyProLigu(leagueName, zebricekPole, zebricekLivePole, timestampNow, leaderboardJson = null, zebricekMapa = null, kolaZapasyMap = null, dohranaKolaSet = null) {
   const aktivniSkupiny = Object.values(RAM_GROUPS).filter(g => g.liga === leagueName && g.status === "ACTIVE");
   if (aktivniSkupiny.length === 0) return;
+
+  const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
+  const ligaKlic = String(leagueName).replace(/ /g, "_");
 
   for (const grp of aktivniSkupiny) {
     const clenoveSet = new Set(grp.clenove || []);
@@ -2101,6 +2104,185 @@ async function generujSkupinyProLigu(leagueName, zebricekPole, zebricekLivePole,
       if (p.uid) grpMapaPrezdivek[p.uid] = p.nickname;
     });
 
+    // 1. 🐺 LOKÁLNÍ RADAR PRO SKUPINU (Vlci samotáři, Zlatý důl, Totální výbuchy pouze mezi členy party)
+    const grpProfiles = {};
+    (grp.clenove || []).forEach(mUid => {
+      if (RAM_USERS_PROFILES[mUid]) {
+        grpProfiles[mUid] = RAM_USERS_PROFILES[mUid];
+      }
+    });
+    const grpRadar = spoctiRadarStatistikyBot(centralMatches, grpProfiles, RAM_USERS_TIPS, leagueName);
+    if (leaderboardJson?.radar?.stedrostKlubu) {
+      grpRadar.stedrostKlubu = leaderboardJson.radar.stedrostKlubu;
+    }
+
+    // 2. 📊 LOKÁLNÍ REKORDY A STATISTIKY PARTY (Přesné výsledky, TOP zápasy, tendence)
+    const computeTop3Grp = (arr, valKey) => {
+      const valid = arr.map(p => ({ nickname: p.nickname, val: p[valKey] || 0 })).filter(p => p.val > 0);
+      const uniqueVals = [...new Set(valid.map(p => p.val))].sort((a, b) => b - a).slice(0, 3);
+      return uniqueVals.map(val => {
+        const names = valid.filter(p => p.val === val).map(p => p.nickname).join(', ');
+        return { count: val, points: val, names, text: names };
+      });
+    };
+
+    const grpTop3Presne = computeTop3Grp(grpZebricek, 'presneVysledkyCount');
+    const grpTop3PresneTop = computeTop3Grp(grpZebricek, 'presneTopMatchesCount');
+    const grpTop3SpravneTendence = computeTop3Grp(grpZebricek, 'spravneTendenceCount');
+    const grpTop3PresneLive = computeTop3Grp(grpZebricekLive, 'presneVysledkyCount');
+    const grpTop3PresneTopLive = computeTop3Grp(grpZebricekLive, 'presneTopMatchesCount');
+    const grpTop3SpravneTendenceLive = computeTop3Grp(grpZebricekLive, 'spravneTendenceCount');
+
+    // ⚡ Rekord za jedno kolo uvnitř party
+    const vsechnyKolaZiskyGrp = [];
+    const vsechnyKolaZiskyGrpLive = [];
+    if (zebricekMapa) {
+      grpZebricek.forEach(p => {
+        const uData = zebricekMapa[p.uid];
+        if (uData?.bodyPoKolech) {
+          Object.entries(uData.bodyPoKolech).forEach(([klicKola, pts]) => {
+            if (pts > 0) vsechnyKolaZiskyGrp.push({ nickname: p.nickname, points: pts, round: klicKola });
+          });
+        }
+        if (uData?.bodyPoKolechLive) {
+          Object.entries(uData.bodyPoKolechLive).forEach(([klicKola, pts]) => {
+            if (pts > 0) vsechnyKolaZiskyGrpLive.push({ nickname: p.nickname, points: pts, round: klicKola });
+          });
+        }
+      });
+    }
+    const computeTopKolaGrp = (list) => {
+      const unique = [...new Set(list.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+      return unique.map(points => {
+        const entries = list.filter(p => p.points === points);
+        const text = entries.map(e => `${e.nickname} (${e.round})`).join(', ');
+        return { points, text };
+      });
+    };
+    const grpTop3Kola = computeTopKolaGrp(vsechnyKolaZiskyGrp);
+    const grpTop3KolaLive = computeTopKolaGrp(vsechnyKolaZiskyGrpLive.length > 0 ? vsechnyKolaZiskyGrpLive : vsechnyKolaZiskyGrp);
+
+    // 👑 Tituly Hráč kola uvnitř party
+    const grpVyhraVKolePocet = {};
+    const grpVyhranaKolaSeznam = {};
+    if (dohranaKolaSet && zebricekMapa) {
+      dohranaKolaSet.forEach(klicKola => {
+        let maxPtsGrp = -Infinity;
+        grpZebricek.forEach(p => {
+          const pts = zebricekMapa[p.uid]?.bodyPoKolech?.[klicKola];
+          if (pts !== undefined && pts > maxPtsGrp && pts > 0) maxPtsGrp = pts;
+        });
+        if (maxPtsGrp > 0) {
+          grpZebricek.forEach(p => {
+            if (zebricekMapa[p.uid]?.bodyPoKolech?.[klicKola] === maxPtsGrp) {
+              const nick = p.nickname;
+              grpVyhraVKolePocet[nick] = (grpVyhraVKolePocet[nick] || 0) + 1;
+              if (!grpVyhranaKolaSeznam[nick]) grpVyhranaKolaSeznam[nick] = [];
+              grpVyhranaKolaSeznam[nick].push(klicKola);
+            }
+          });
+        }
+      });
+    }
+    const vsechnyHraciKolaGrp = Object.keys(grpVyhraVKolePocet).map(nick => ({
+      nickname: nick,
+      count: grpVyhraVKolePocet[nick],
+      rounds: (grpVyhranaKolaSeznam[nick] || []).join(' & ')
+    })).filter(p => p.count > 0);
+    const unikatniHraciKolaBadgesGrp = [...new Set(vsechnyHraciKolaGrp.map(p => p.count))].sort((a, b) => b - a).slice(0, 3);
+    const grpTop3HraciKola = unikatniHraciKolaBadgesGrp.map(count => {
+      const entries = vsechnyHraciKolaGrp.filter(p => p.count === count);
+      const names = entries.map(e => `${e.nickname} (${e.rounds})`).join(', ');
+      return { count, names };
+    });
+
+    // 💎 Perfektní kola členů party
+    const grpPerfektniKola = (leaderboardJson?.perfektniKola || []).filter(pk => clenoveSet.has(pk.uid));
+
+    // 📈 Otevřená kola uvnitř party
+    const grpOtevrenaKolaStatistiky = (leaderboardJson?.otevrenaKolaSeznam || []).map(klicKola => {
+      const zisky = grpZebricek.map(p => ({
+        nickname: p.nickname,
+        points: zebricekMapa?.[p.uid]?.bodyPoKolech?.[klicKola] || 0
+      }));
+      const unikatni = [...new Set(zisky.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+      const top3 = unikatni.map(points => ({
+        points,
+        names: zisky.filter(p => p.points === points).map(p => p.nickname).join(', ')
+      }));
+      return { round: klicKola, top3 };
+    });
+
+    const grpOtevrenaKolaStatistikyLive = (leaderboardJson?.otevrenaKolaSeznam || []).map(klicKola => {
+      const zisky = grpZebricek.map(p => ({
+        nickname: p.nickname,
+        points: zebricekMapa?.[p.uid]?.bodyPoKolechLive?.[klicKola] !== undefined 
+          ? zebricekMapa[p.uid].bodyPoKolechLive[klicKola] 
+          : (zebricekMapa?.[p.uid]?.bodyPoKolech?.[klicKola] || 0)
+      }));
+      const unikatni = [...new Set(zisky.map(p => p.points))].sort((a, b) => b - a).slice(0, 3);
+      const top3 = unikatni.map(points => ({
+        points,
+        names: zisky.filter(p => p.points === points).map(p => p.nickname).join(', ')
+      }));
+      return { round: klicKola, top3 };
+    });
+
+    // 🏆 Souhrny kol upravené pro partu (Hráč kola v partě, TOP zápasy party)
+    const grpKolaSouhrn = {};
+    if (kolaZapasyMap) {
+      Object.keys(kolaZapasyMap).forEach(klicKola => {
+        const zapasyVKole = kolaZapasyMap[klicKola] || [];
+        const isFinished = dohranaKolaSet?.has(klicKola) || false;
+
+        let maxPts = -Infinity;
+        let winners = [];
+        grpZebricek.forEach(p => {
+          const uData = zebricekMapa?.[p.uid];
+          const pts = uData?.bodyPoKolechLive?.[klicKola] !== undefined
+            ? uData.bodyPoKolechLive[klicKola]
+            : (uData?.bodyPoKolech?.[klicKola] || 0);
+          if (pts > maxPts) maxPts = pts;
+        });
+        if (maxPts > 0) {
+          grpZebricek.forEach(p => {
+            const uData = zebricekMapa?.[p.uid];
+            const pts = uData?.bodyPoKolechLive?.[klicKola] !== undefined
+              ? uData.bodyPoKolechLive[klicKola]
+              : (uData?.bodyPoKolech?.[klicKola] || 0);
+            if (pts === maxPts) winners.push(p.nickname);
+          });
+        }
+
+        const topMatch = zapasyVKole.find(z => z.isTopMatch);
+        let topMatchExactUsers = [];
+        if (topMatch && topMatch.vysledek_domaci !== undefined && topMatch.vysledek_domaci !== null) {
+          const rD = parseInt(topMatch.vysledek_domaci, 10);
+          const rH = parseInt(topMatch.vysledek_hoste, 10);
+          grpZebricek.forEach(p => {
+            const tip = RAM_USERS_TIPS[p.uid]?.[ligaKlic]?.tipy?.[topMatch.id];
+            if (tip && parseInt(tip.tip_domaci, 10) === rD && parseInt(tip.tip_hoste, 10) === rH) {
+              topMatchExactUsers.push(p.nickname);
+            }
+          });
+        }
+
+        grpKolaSouhrn[klicKola] = {
+          isFinished,
+          hracKola: winners.length > 0 ? { names: winners.join(', '), points: maxPts, count: winners.length } : null,
+          topMatch: topMatch ? {
+            hasTopMatch: true,
+            isStarted: topMatch.vysledek_domaci !== undefined || (topMatch.datum && new Date(topMatch.datum) <= new Date()),
+            isEvaluated: topMatch.vysledek_domaci !== undefined && topMatch.vysledek_domaci !== null,
+            domaci: topMatch.domaci,
+            hoste: topMatch.hoste,
+            exactCount: topMatchExactUsers.length,
+            exactUsers: topMatchExactUsers
+          } : null
+        };
+      });
+    }
+
     const groupJson = {
       skupina: {
         id: grp.id,
@@ -2114,12 +2296,29 @@ async function generujSkupinyProLigu(leagueName, zebricekPole, zebricekLivePole,
       zebricekLive: grpZebricekLive,
       mapaPrezdivek: grpMapaPrezdivek,
       isLive: zebricekLivePole.length > 0 && grpZebricekLive.some(p => p.celkemBoduLive !== p.celkemBodu),
+      top3Presne: grpTop3Presne,
+      top3PresneTop: grpTop3PresneTop,
+      top3SpravneTendence: grpTop3SpravneTendence,
+      top3PresneLive: grpTop3PresneLive,
+      top3PresneTopLive: grpTop3PresneTopLive,
+      top3SpravneTendenceLive: grpTop3SpravneTendenceLive,
+      top3Kola: grpTop3Kola,
+      top3KolaLive: grpTop3KolaLive,
+      top3HraciKola: grpTop3HraciKola,
+      top3HraciKolaLive: grpTop3HraciKola,
+      perfektniKola: grpPerfektniKola,
+      otevrenaKolaStatistiky: grpOtevrenaKolaStatistiky,
+      otevrenaKolaStatistikyLive: grpOtevrenaKolaStatistikyLive,
+      otevrenaKolaSeznam: leaderboardJson?.otevrenaKolaSeznam || [],
+      aktivniKoloText: leaderboardJson?.aktivniKoloText || "1",
+      kolaSouhrn: grpKolaSouhrn,
+      radar: grpRadar,
       aktualizovano: timestampNow
     };
 
     await uploadToR2(leagueName, `skupiny/${grp.id}.json`, groupJson);
   }
-  console.log(`👥 R2 SKUPINY [${leagueName}]: Úspěšně vygenerováno ${aktivniSkupiny.length} žebříčků part.`);
+  console.log(`👥 R2 SKUPINY [${leagueName}]: Úspěšně vygenerováno ${aktivniSkupiny.length} žebříčků part (včetně lokálních statistik a radaru).`);
 }
 
 // 🛡️ GILOTINA BOTA: Kontrola a tvrdý výmaz neúplných part (<10) po výkopu sezóny
@@ -3301,7 +3500,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         await uploadToR2(leagueName, "leaderboard.json", leaderboardJson);
         await uploadToR2(leagueName, "rozpis.json", rozpisJson);
         await rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches);
-        await generujSkupinyProLigu(leagueName, zebricekPole, zebricekLivePole, timestampNow);
+        await generujSkupinyProLigu(leagueName, zebricekPole, zebricekLivePole, timestampNow, leaderboardJson, zebricekMapa, kolaZapasyMap, dohranaKolaSet);
 
         try {
             const pulsRef = db.collection('ligy').doc(leagueName).collection('stav').doc('puls');
