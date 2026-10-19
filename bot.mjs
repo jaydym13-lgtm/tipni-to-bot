@@ -4949,64 +4949,98 @@ async function synchronizujGrafikuLig() {
 startEnterpriseApplication();
 
 // =========================================================================
-// 🏆 POHÁROVÝ ENGINE: TIPNI CHANCE CUP & TIPNI PREMIER CUP
+// 🏆 UNIVERZÁLNÍ TURNAJOVÝ ENGINE PRO N HRÁČŮ (TIPNI CUP V3)
 // =========================================================================
 
-function vypocitejHadíRozdeleni(sortedPlayers) {
-    const groups = { A: [], B: [], C: [], D: [] };
-    const groupKeys = ["A", "B", "C", "D"];
-    if (!Array.isArray(sortedPlayers)) return groups;
+// 🔢 Matematický výpočet optimálního počtu skupin (vždy 4 až 5 hráčů ve skupině)
+function urciPocetSkupinCupu(N) {
+    if (N <= 7) return 1;
+    if (N <= 11) return 2; // Např. 11 hráčů = 6 + 5
+    const minK = Math.ceil(N / 5);
+    const maxK = Math.floor(N / 4);
+    if (minK <= maxK) {
+        let bestK = minK;
+        let bestDiff = Math.abs(N / minK - 4.5);
+        for (let k = minK + 1; k <= maxK; k++) {
+            const diff = Math.abs(N / k - 4.5);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                bestK = k;
+            }
+        }
+        return bestK;
+    }
+    return Math.max(1, Math.round(N / 4.5));
+}
+
+// 🐍 Dynamický Hadí draft do K skupin
+function vypocitejUniverzalniHad(sortedPlayers) {
+    const N = sortedPlayers.length;
+    const K = urciPocetSkupinCupu(N);
+    const groupKeys = Array.from({ length: K }, (_, i) => String.fromCharCode(65 + i)); // A, B, C, D...
+    const groups = {};
+    groupKeys.forEach(k => { groups[k] = []; });
 
     sortedPlayers.forEach((p, index) => {
-        const round = Math.floor(index / 4);
-        const pos = index % 4;
-        const grpIdx = (round % 2 === 0) ? pos : (3 - pos);
-        groups[groupKeys[grpIdx]].push({
+        const round = Math.floor(index / K);
+        const pos = index % K;
+        const grpIdx = (round % 2 === 0) ? pos : (K - 1 - pos);
+        const targetKey = groupKeys[grpIdx];
+
+        groups[targetKey].push({
             uid: p.uid,
             nick: p.nickname || p.nick || "Anonym",
             seed: index + 1,
+            originalRank: index + 1,
             pts: p.celkemBodu || 0
         });
     });
-    return groups;
+
+    return { groups, groupKeys };
 }
 
-function vyhodnotVitezePlayoffDuelu(p1, p2, leagueName = "Chance Liga") {
+// ⚖️ Pomocná kritéria pro Play-off duely
+function vyhodnotVitezePlayoffDuelu(p1, p2, leagueName) {
     if (p1.totalPts > p2.totalPts) return p1.uid;
     if (p2.totalPts > p1.totalPts) return p2.uid;
 
-    if (p1.totalExact > p2.totalExact) return p1.uid;
-    if (p2.totalExact > p1.totalExact) return p2.uid;
+    if ((p1.totalExact || 0) > (p2.totalExact || 0)) return p1.uid;
+    if ((p2.totalExact || 0) > (p1.totalExact || 0)) return p2.uid;
 
-    if (p1.totalTopExact > p2.totalTopExact) return p1.uid;
-    if (p2.totalTopExact > p1.totalTopExact) return p2.uid;
+    if ((p1.totalTopExact || 0) > (p2.totalTopExact || 0)) return p1.uid;
+    if ((p2.totalTopExact || 0) > (p1.totalTopExact || 0)) return p2.uid;
 
-    if (p1.totalTend > p2.totalTend) return p1.uid;
-    if (p2.totalTend > p1.totalTend) return p2.uid;
+    if ((p1.totalTend || 0) > (p2.totalTend || 0)) return p1.uid;
+    if ((p2.totalTend || 0) > (p1.totalTend || 0)) return p2.uid;
 
-    if (leagueName === "Premier League") {
-        if ((p1.totalConsolations || 0) > (p2.totalConsolations || 0)) return p1.uid;
-        if ((p2.totalConsolations || 0) > (p1.totalConsolations || 0)) return p2.uid;
-    }
-
-    return p1.seed <= p2.seed ? p1.uid : p2.uid;
+    return (p1.seed || 99) <= (p2.seed || 99) ? p1.uid : p2.uid;
 }
 
+// 🏆 HLAVNÍ AUTONOMNÍ REKONSTRUKTÉR POHÁRU
 async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches) {
-    if (leagueName !== "Chance Liga" && leagueName !== "Premier League") return;
+    // Pohár běží výhradně pro fotbalové soutěže
+    if (leagueName.includes("Extraliga") || leagueName.includes("hokej")) return;
+    if (!zebricekPole || zebricekPole.length === 0) return;
 
-    const isPL = leagueName === "Premier League";
-    const lockRoundNum = isPL ? 9 : 11;
-    const groupStartRound = isPL ? 10 : 12;
-    const groupEndRound = isPL ? 19 : 18;
+    // Harmonogram navázaný na 30. kolo
+    const lockRoundNum = 13;      // 1.–13. kolo: Kvalifikace
+    const groupStartRound = 14;   // 14.–19. kolo: Skupiny (6 kol)
+    const groupEndRound = 19;
+    const preRoundLeg1 = 21;      // 21. & 22. kolo: Předkolo (odvety)
+    const preRoundLeg2 = 22;
+    const ofLeg1 = 23;            // 23. & 24. kolo: Osmifinále
+    const ofLeg2 = 24;
+    const qfLeg1 = 25;            // 25. & 26. kolo: Čtvrtfinále
+    const qfLeg2 = 26;
+    const sfLeg1 = 27;            // 27. & 28. kolo: Semifinále
+    const sfLeg2 = 28;
+    const finalRound = 30;        // 30. kolo: Grand Finále (1 zápas)
 
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const matchesList = Object.values(centralMatches || {});
 
-    const lockRoundMatches = matchesList.filter(z => {
-        const k = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""));
-        return k === lockRoundNum;
-    });
+    // Kontrola dohrání 13. kola pro uzamčení draftu
+    const lockRoundMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === lockRoundNum);
     const lockFinished = lockRoundMatches.length > 0 && lockRoundMatches.every(z => 
         z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED"
     );
@@ -5016,12 +5050,13 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
     let lockedData = lData.cupLock || null;
 
     if (lockFinished && !lockedData && zebricekPole.length > 0) {
-        console.log(`🔒 CUP LOCK TRIGGER [${leagueName}]: ${lockRoundNum}. kolo dohráno! Zamykám složení skupin Poháru.`);
-        const lockedDraft = vypocitejHadíRozdeleni(zebricekPole);
+        console.log(`🔒 CUP LOCK TRIGGER [${leagueName}]: 13. kolo dohráno! Zamykám složení skupin Poháru.`);
+        const { groups: lockedDraft, groupKeys } = vypocitejUniverzalniHad(zebricekPole);
         lockedData = {
             status: "GROUPS_LOCKED",
             lockedAtRound: lockRoundNum,
             lockedAt: new Date().toISOString(),
+            groupKeys: groupKeys,
             initialGroups: lockedDraft
         };
         await db.collection("ligy").doc(leagueName).set({ cupLock: lockedData }, { merge: true }).catch(e => console.error("❌ Chyba zápisu cup_lock:", e));
@@ -5030,37 +5065,36 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
     const isGroupsLocked = Boolean(lockedData && lockedData.initialGroups);
     const status = isGroupsLocked ? "GROUPS_LOCKED" : "PREVIEW";
 
-    const groupsDraft = isGroupsLocked ? lockedData.initialGroups : vypocitejHadíRozdeleni(zebricekPole);
-    const finalGroups = { A: [], B: [], C: [], D: [] };
+    const draftResult = isGroupsLocked 
+        ? { groups: lockedData.initialGroups, groupKeys: lockedData.groupKeys || Object.keys(lockedData.initialGroups) }
+        : vypocitejUniverzalniHad(zebricekPole);
+
+    const { groups: groupsDraft, groupKeys } = draftResult;
+    const finalGroups = {};
+    groupKeys.forEach(k => { finalGroups[k] = []; });
 
     const groupStageMatches = matchesList.filter(z => {
         const kNum = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""));
         return kNum >= groupStartRound && kNum <= groupEndRound;
     });
 
-    for (const grpKey of ["A", "B", "C", "D"]) {
+    // Výpočet bodů ve skupinách (14.–19. kolo)
+    for (const grpKey of groupKeys) {
         const members = groupsDraft[grpKey] || [];
 
         finalGroups[grpKey] = members.map(m => {
-            let pts = 0;
-            let exact = 0;
-            let topExact = 0;
-            let tend = 0;
-            let consolations = 0;
+            let pts = 0, exact = 0, topExact = 0, tend = 0;
 
             if (isGroupsLocked && groupStageMatches.length > 0) {
                 const uSouteze = RAM_USERS_TIPS[m.uid] || {};
                 const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
 
                 groupStageMatches.forEach(zap => {
-                    const isEvaluated = zap.vysledek_domaci !== undefined && zap.vysledek_domaci !== null;
-                    if (!isEvaluated) return;
-
+                    if (zap.vysledek_domaci === undefined || zap.vysledek_domaci === null) return;
                     const uTip = uTips[zap.id || zap.matchId];
                     if (uTip) {
                         const b = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zap.vysledek_domaci, zap.vysledek_hoste, uTip.postup, zap.postup, zap.isPlayoff, zap.isTopMatch, leagueName);
                         pts += b;
-
                         const tD = parseInt(uTip.tip_domaci); const tH = parseInt(uTip.tip_hoste);
                         const rD = parseInt(zap.vysledek_domaci); const rH = parseInt(zap.vysledek_hoste);
                         if (tD === rD && tH === rH) {
@@ -5069,9 +5103,6 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
                         }
                         if ((tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH)) {
                             tend++;
-                        }
-                        if (isPL && (tD === rD || tH === rH)) {
-                            consolations++;
                         }
                     }
                 });
@@ -5087,8 +5118,7 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
                 pts: pts,
                 exact: exact,
                 topExact: topExact,
-                tend: tend,
-                consolations: consolations
+                tend: tend
             };
         });
 
@@ -5098,48 +5128,27 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
                 if (b.exact !== a.exact) return b.exact - a.exact;
                 if (b.topExact !== a.topExact) return b.topExact - a.topExact;
                 if (b.tend !== a.tend) return b.tend - a.tend;
-                if (isPL && b.consolations !== a.consolations) return b.consolations - a.consolations;
                 return a.seed - b.seed;
             }
             return a.seed - b.seed;
         });
     }
 
-    let secondPlacesRank = [];
-    if (!isPL && isGroupsLocked) {
-        ["A", "B", "C", "D"].forEach(grpKey => {
-            const grp = finalGroups[grpKey];
-            if (grp.length >= 2) {
-                secondPlacesRank.push({
-                    ...grp[1],
-                    group: grpKey
-                });
-            }
-        });
+    // 🌳 KONTROLA A GENERÁTOR UNIVERZÁLNÍHO PLAY-OFF
+    const rEndMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === groupEndRound);
+    const rEndFinished = rEndMatches.length > 0 && rEndMatches.every(z => z.vysledek_domaci !== undefined && z.apiStatus !== 'IN_PLAY');
 
-        secondPlacesRank.sort((a, b) => {
-            if (b.pts !== a.pts) return b.pts - a.pts;
-            if (b.exact !== a.exact) return b.exact - a.exact;
-            if (b.topExact !== a.topExact) return b.topExact - a.topExact;
-            if (b.tend !== a.tend) return b.tend - a.tend;
-            return a.seed - b.seed;
-        });
-
-        secondPlacesRank = secondPlacesRank.map((p, idx) => ({
-            ...p,
-            rank: idx + 1,
-            qualifiedToTop6: idx < 2
-        }));
+    let playoffData = null;
+    if (rEndFinished) {
+        playoffData = sestavUniverzalniPlayoff(leagueName, finalGroups, groupKeys, matchesList);
     }
-
-    const playoffData = sestavPlayoffPavouka(leagueName, finalGroups, secondPlacesRank, matchesList);
 
     const cupJson = {
         leagueName: leagueName,
         status: playoffData ? "PLAYOFF" : status,
         lockedAtRound: isGroupsLocked ? lockRoundNum : null,
+        groupKeys: groupKeys,
         groups: finalGroups,
-        secondPlacesRank: secondPlacesRank,
         playoff: playoffData,
         aktualizovano: new Date().toISOString()
     };
@@ -5147,23 +5156,33 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
     await uploadToR2(leagueName, "cup.json", cupJson);
 }
 
-function sestavPlayoffPavouka(leagueName, finalGroups, secondPlacesRank, matchesList) {
-    const isPL = leagueName === "Premier League";
-    const groupEndRound = isPL ? 19 : 18;
+// 🌳 UNIVERZÁLNÍ BRACKET GENERÁTOR PRO N HRÁČŮ S KRÁLOVSKÝMI VOLNY
+function sestavUniverzalniPlayoff(leagueName, finalGroups, groupKeys, matchesList) {
+    const ligaKlic = String(leagueName).replace(/ /g, '_');
 
-    const rEndMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === groupEndRound);
-    const rEndFinished = rEndMatches.length > 0 && rEndMatches.every(z => z.vysledek_domaci !== undefined && z.apiStatus !== 'IN_PLAY');
+    // 1. Sloučení a seřazení všech hráčů po skupinách (Nasazení 1..N)
+    const tiers = [];
+    const maxGroupLen = Math.max(...groupKeys.map(k => (finalGroups[k] || []).length));
+    for (let r = 0; r < maxGroupLen; r++) {
+        const tierPlayers = groupKeys.map(k => finalGroups[k]?.[r]).filter(Boolean);
+        tierPlayers.sort((a, b) => b.pts - a.pts || b.exact - a.exact || a.seed - b.seed);
+        tiers.push(...tierPlayers);
+    }
+    const fullSeeding = tiers.map((p, idx) => ({ ...p, generalSeed: idx + 1 }));
+    const N = fullSeeding.length;
+    if (N < 4) return null;
 
-    if (!rEndFinished) return null;
+    // Cílová velikost pavouka (8 nebo 16)
+    const T = N <= 16 ? 8 : 16;
+    const byesCount = Math.max(0, 2 * T - N); // Královská volna pro špičku
+    const predkoloPlayersCount = 2 * (N - T);  // Hráči do předkola
+    const numPredkoloDuels = N - T;
 
     const getPlayerRoundStats = (uid, roundNum) => {
         const uSouteze = RAM_USERS_TIPS[uid] || {};
-        const ligaKlic = String(leagueName).replace(/ /g, '_');
-        const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
-
+        const uTips = uSouteze[ligaKlic]?.tipy || {};
         const roundMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === roundNum);
-        let pts = 0, exact = 0, topExact = 0, tend = 0, consolations = 0;
-        let isStarted = false;
+        let pts = 0, exact = 0, topExact = 0, tend = 0, isStarted = false;
 
         roundMatches.forEach(zap => {
             if (zap.vysledek_domaci !== undefined) {
@@ -5177,142 +5196,118 @@ function sestavPlayoffPavouka(leagueName, finalGroups, secondPlacesRank, matches
                         exact++;
                         if (zap.isTopMatch) topExact++;
                     }
-                    if ((td > th && rd > rh) || (td < th && rd < rh) || (td === th && rd === rh)) {
-                        tend++;
-                    }
-                    if (isPL && (td === rd || th === rh)) {
-                        consolations++;
-                    }
+                    if ((td > th && rd > rh) || (td < th && rd < rh) || (td === th && rd === rh)) tend++;
                 }
             }
         });
-
-        return { pts, exact, topExact, tend, consolations, isStarted };
+        return { pts, exact, topExact, tend, isStarted };
     };
 
-    if (isPL) {
-        const g1 = ['A', 'B', 'C', 'D'].map(k => finalGroups[k]?.[0]).filter(Boolean).sort((a,b) => b.pts - a.pts || a.seed - b.seed);
-        const g2 = ['A', 'B', 'C', 'D'].map(k => finalGroups[k]?.[1]).filter(Boolean).sort((a,b) => b.pts - a.pts || a.seed - b.seed);
-        const g3 = ['A', 'B', 'C', 'D'].map(k => finalGroups[k]?.[2]).filter(Boolean).sort((a,b) => b.pts - a.pts || a.seed - b.seed);
-        const g4 = ['A', 'B', 'C', 'D'].map(k => finalGroups[k]?.[3]).filter(Boolean).sort((a,b) => b.pts - a.pts || a.seed - b.seed);
-        const g5 = ['A', 'B', 'C', 'D'].map(k => finalGroups[k]?.[4]).filter(Boolean).sort((a,b) => b.pts - a.pts || a.seed - b.seed);
+    const buildDuel = (p1SeedObj, p2SeedObj, roundL1, roundL2, duelTitle, isSingle = false) => {
+        const p1L1 = getPlayerRoundStats(p1SeedObj?.uid, roundL1);
+        const p1L2 = isSingle ? { pts: 0, exact: 0, topExact: 0, tend: 0, isStarted: false } : getPlayerRoundStats(p1SeedObj?.uid, roundL2);
+        const p2L1 = getPlayerRoundStats(p2SeedObj?.uid, roundL1);
+        const p2L2 = isSingle ? { pts: 0, exact: 0, topExact: 0, tend: 0, isStarted: false } : getPlayerRoundStats(p2SeedObj?.uid, roundL2);
 
-        const fullSeedingPL = [
-            ...g1.map((p, i) => ({ ...p, generalSeed: i + 1 })),
-            ...g2.map((p, i) => ({ ...p, generalSeed: i + 5 })),
-            ...g3.map((p, i) => ({ ...p, generalSeed: i + 9 })),
-            ...g4.map((p, i) => ({ ...p, generalSeed: i + 13 })),
-            ...g5.map((p, i) => ({ ...p, generalSeed: i + 17 }))
-        ];
+        const p1Obj = {
+            uid: p1SeedObj?.uid, nick: p1SeedObj?.nick, seed: p1SeedObj?.generalSeed,
+            leg1: p1L1.isStarted ? p1L1.pts : null, leg2: (!isSingle && p1L2.isStarted) ? p1L2.pts : null,
+            totalPts: (p1L1.pts || 0) + (p1L2.pts || 0),
+            totalExact: p1L1.exact + p1L2.exact, totalTopExact: p1L1.topExact + p1L2.topExact, totalTend: p1L1.tend + p1L2.tend
+        };
+        const p2Obj = {
+            uid: p2SeedObj?.uid, nick: p2SeedObj?.nick, seed: p2SeedObj?.generalSeed,
+            leg1: p2L1.isStarted ? p2L1.pts : null, leg2: (!isSingle && p2L2.isStarted) ? p2L2.pts : null,
+            totalPts: (p2L1.pts || 0) + (p2L2.pts || 0),
+            totalExact: p2L1.exact + p2L2.exact, totalTopExact: p2L1.topExact + p2L2.topExact, totalTend: p2L1.tend + p2L2.tend
+        };
 
-        const pr1Duels = [];
-        for (let i = 0; i < 4; i++) {
-            const p1 = fullSeedingPL[12 + i];
-            const p2 = fullSeedingPL[19 - i];
-
-            const p1L1 = getPlayerRoundStats(p1?.uid, 21);
-            const p1L2 = getPlayerRoundStats(p1?.uid, 22);
-            const p2L1 = getPlayerRoundStats(p2?.uid, 21);
-            const p2L2 = getPlayerRoundStats(p2?.uid, 22);
-
-            const p1Obj = {
-                uid: p1?.uid, nick: p1?.nick, seed: p1?.generalSeed,
-                leg1: p1L1.isStarted ? p1L1.pts : null, leg2: p1L2.isStarted ? p1L2.pts : null,
-                totalPts: (p1L1.pts || 0) + (p1L2.pts || 0),
-                totalExact: p1L1.exact + p1L2.exact, totalTopExact: p1L1.topExact + p1L2.topExact, totalTend: p1L1.tend + p1L2.tend, totalConsolations: p1L1.consolations + p1L2.consolations
-            };
-            const p2Obj = {
-                uid: p2?.uid, nick: p2?.nick, seed: p2?.generalSeed,
-                leg1: p2L1.isStarted ? p2L1.pts : null, leg2: p2L2.isStarted ? p2L2.pts : null,
-                totalPts: (p2L1.pts || 0) + (p2L2.pts || 0),
-                totalExact: p2L1.exact + p2L2.exact, totalTopExact: p2L1.topExact + p2L2.topExact, totalTend: p2L1.tend + p2L2.tend, totalConsolations: p2L1.consolations + p2L2.consolations
-            };
-
-            const isFinished = p1L2.isStarted && p2L2.isStarted;
-            const winnerUid = isFinished ? vyhodnotVitezePlayoffDuelu(p1Obj, p2Obj, leagueName) : null;
-
-            pr1Duels.push({
-                duelId: `PR1_${i + 1}`,
-                title: `1. Předkolo ${i + 1}`,
-                statusText: isFinished ? 'DOHRÁNO ✓' : (p1L1.isStarted ? 'ODVETA ⏳' : 'ČEKÁ NA VÝKOP'),
-                p1: p1Obj, p2: p2Obj, winnerUid: winnerUid
-            });
-        }
+        const isFinished = isSingle ? p1L1.isStarted : (p1L2.isStarted && p2L2.isStarted);
+        const winnerUid = isFinished ? vyhodnotVitezePlayoffDuelu(p1Obj, p2Obj, leagueName) : null;
 
         return {
-            rounds: [
-                {
-                    name: "🥊 1. PŘEDKOLO (21. & 22. KOLO)",
-                    info: "4. vs. 5. místa ze skupin (Dvojzápas)",
-                    isSingleMatch: false,
-                    duels: pr1Duels
-                }
-            ]
+            title: duelTitle,
+            statusText: isFinished ? 'DOHRÁNO ✓' : (p1L1.isStarted ? (isSingle ? 'LIVE 🔴' : 'ODVETA ⏳') : 'ČEKÁ NA VÝKOP'),
+            p1: p1Obj, p2: p2Obj, winnerUid: winnerUid,
+            winner: winnerUid === p1Obj.uid ? p1Obj : (winnerUid === p2Obj.uid ? p2Obj : null)
         };
-    } else {
-        const top4Winners = ['A', 'B', 'C', 'D'].map(k => finalGroups[k]?.[0]).filter(Boolean).sort((a, b) => b.pts - a.pts || a.seed - b.seed);
-        const top2Seconds = secondPlacesRank.filter(sp => sp.qualifiedToTop6);
-        const other2Seconds = secondPlacesRank.filter(sp => !sp.qualifiedToTop6);
+    };
 
-        const restOfPlayers = [];
-        ['A', 'B', 'C', 'D'].forEach(k => {
-            const grp = finalGroups[k] || [];
-            for (let i = 2; i < grp.length; i++) {
-                restOfPlayers.push(grp[i]);
-            }
+    const rounds = [];
+
+    // FÁZE 1: PŘEDKOLO (21. & 22. kolo) - pouze pokud máme hráče navíc
+    const predkoloWinners = [];
+    if (numPredkoloDuels > 0) {
+        const pkDuels = [];
+        for (let i = 0; i < numPredkoloDuels; i++) {
+            const p1 = fullSeeding[byesCount + i];
+            const p2 = fullSeeding[N - 1 - i];
+            const duel = buildDuel(p1, p2, 21, 22, `Předkolo • Duel ${i + 1}`);
+            pkDuels.push(duel);
+            if (duel.winner) predkoloWinners.push(duel.winner);
+        }
+        rounds.push({
+            name: "🥊 PŘEDKOLO (21. & 22. KOLO)",
+            info: `${numPredkoloDuels} duelů na odvety (${byesCount} hráčů má volný los)`,
+            duels: pkDuels
         });
-        restOfPlayers.push(...other2Seconds);
-        restOfPlayers.sort((a, b) => b.pts - a.pts || a.seed - b.seed);
-
-        const fullSeedingCL = [
-            ...top4Winners.map((p, i) => ({ ...p, generalSeed: i + 1 })),
-            ...top2Seconds.map((p, i) => ({ ...p, generalSeed: i + 5 })),
-            ...restOfPlayers.map((p, i) => ({ ...p, generalSeed: i + 7 }))
-        ];
-
-        const preRoundDuels = [];
-        for (let i = 0; i < 10; i++) {
-            const p1Seed = fullSeedingCL[6 + i];
-            const p2Seed = fullSeedingCL[25 - i];
-
-            const p1L1 = getPlayerRoundStats(p1Seed?.uid, 19);
-            const p1L2 = getPlayerRoundStats(p1Seed?.uid, 20);
-            const p2L1 = getPlayerRoundStats(p2Seed?.uid, 19);
-            const p2L2 = getPlayerRoundStats(p2Seed?.uid, 20);
-
-            const p1Obj = {
-                uid: p1Seed?.uid, nick: p1Seed?.nick, seed: p1Seed?.generalSeed,
-                leg1: p1L1.isStarted ? p1L1.pts : null, leg2: p1L2.isStarted ? p1L2.pts : null,
-                totalPts: (p1L1.pts || 0) + (p1L2.pts || 0),
-                totalExact: p1L1.exact + p1L2.exact, totalTopExact: p1L1.topExact + p1L2.topExact, totalTend: p1L1.tend + p1L2.tend
-            };
-            const p2Obj = {
-                uid: p2Seed?.uid, nick: p2Seed?.nick, seed: p2Seed?.generalSeed,
-                leg1: p2L1.isStarted ? p2L1.pts : null, leg2: p2L2.isStarted ? p2L2.pts : null,
-                totalPts: (p2L1.pts || 0) + (p2L2.pts || 0),
-                totalExact: p2L1.exact + p2L2.exact, totalTopExact: p2L1.topExact + p2L2.topExact, totalTend: p2L1.tend + p2L2.tend
-            };
-
-            const isFinished = p1L2.isStarted && p2L2.isStarted;
-            const winnerUid = isFinished ? vyhodnotVitezePlayoffDuelu(p1Obj, p2Obj, leagueName) : null;
-
-            preRoundDuels.push({
-                duelId: `PR_${i + 1}`,
-                title: `Předkolo ${i + 1}`,
-                statusText: isFinished ? 'DOHRÁNO ✓' : (p1L1.isStarted ? 'ODVETA ⏳' : 'ČEKÁ NA VÝKOP'),
-                p1: p1Obj, p2: p2Obj, winnerUid: winnerUid
-            });
-        }
-
-        return {
-            rounds: [
-                {
-                    name: "🥊 PŘEDKOLO (19. & 20. KOLO)",
-                    info: "Dvouzápasový souboj (Doma / Odveta)",
-                    isSingleMatch: false,
-                    duels: preRoundDuels
-                }
-            ]
-        };
     }
+
+    // FÁZE 2: TURNAJOVÝ STROM (Osmifinále -> Čtvrtfinále -> Semifinále -> Finále)
+    const directQualifiers = fullSeeding.slice(0, byesCount);
+    const roundOf16Field = [...directQualifiers, ...predkoloWinners];
+
+    // Osmifinále (23. & 24. kolo)
+    const ofDuels = [];
+    if (T === 16) {
+        for (let i = 0; i < 8; i++) {
+            const p1 = roundOf16Field[i];
+            const p2 = roundOf16Field[15 - i];
+            const duel = buildDuel(p1, p2, 23, 24, `Osmifinále • Duel ${i + 1}`);
+            ofDuels.push(duel);
+        }
+        rounds.push({
+            name: "🏆 OSMIFINÁLE (23. & 24. KOLO)",
+            info: "8 duelů na odvety (16 hráčů)",
+            duels: ofDuels
+        });
+    }
+
+    // Čtvrtfinále (25. & 26. kolo)
+    const qfField = T === 16 ? ofDuels.map(d => d.winner).filter(Boolean) : roundOf16Field;
+    const qfDuels = [];
+    for (let i = 0; i < 4; i++) {
+        const p1 = qfField[i];
+        const p2 = qfField[7 - i];
+        const duel = buildDuel(p1, p2, 25, 26, `Čtvrtfinále • Duel ${i + 1}`);
+        qfDuels.push(duel);
+    }
+    rounds.push({
+        name: "👑 ČTVRTFINÁLE (25. & 26. KOLO)",
+        info: "4 duely na odvety (TOP 8)",
+        duels: qfDuels
+    });
+
+    // Semifinále (27. & 28. kolo)
+    const sfField = qfDuels.map(d => d.winner).filter(Boolean);
+    const sf1 = buildDuel(sfField[0], sfField[1], 27, 28, "Semifinále • Duel 1");
+    const sf2 = buildDuel(sfField[2], sfField[3], 27, 28, "Semifinále • Duel 2");
+    rounds.push({
+        name: "🔥 SEMIFINÁLE (27. & 28. KOLO)",
+        info: "2 duely na odvety (TOP 4)",
+        duels: [sf1, sf2]
+    });
+
+    // Grand Finále (30. kolo - 1 zápas ALL-IN)
+    const finalDuel = buildDuel(sf1.winner, sf2.winner, 30, null, "Grand Finále", true);
+    rounds.push({
+        name: "🏆 GRAND FINÁLE (30. KOLO)",
+        info: "Rozhodující finálový zápas (1 zápas ALL-IN)",
+        duels: [finalDuel]
+    });
+
+    return {
+        byesCount: byesCount,
+        rounds: rounds
+    };
 }
