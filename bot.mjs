@@ -5020,7 +5020,7 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
     const arenaEndRound = 17;
 
     const ligaKlic = String(leagueName).replace(/ /g, "_");
-    const matchesList = Object.values(centralMatches || {});
+    const matchesList = Object.entries(centralMatches || {}).map(([id, z]) => ({ ...z, id, matchId: id }));
 
     // Kontrola dohrání 9. kola pro uzamčení soupisky a startovního nasazení (Seeds)
     const lockMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === lockRoundNum);
