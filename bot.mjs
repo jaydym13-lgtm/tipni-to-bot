@@ -5015,14 +5015,14 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
     if (leagueName.includes("Extraliga") || leagueName.includes("hokej") || leagueName.includes("Liga mistrů")) return;
     if (!zebricekPole || zebricekPole.length === 0) return;
 
-    const lockRoundNum = 11;      // 1.–11. kolo: Kvalifikace (uzamčení po 11. kole)
-    const arenaStartRound = 12;   // 12.–17. kolo: Pohárová aréna (přesně 6 kol ligové fáze)
+    const lockRoundNum = 9;       // 1.–9. kolo: Ligový start (nasazení se zamyká po 9. kole)
+    const arenaStartRound = 10;   // 10.–17. kolo: Pohárová aréna (přesně 8 kol ligové fáze od nuly)
     const arenaEndRound = 17;
 
     const ligaKlic = String(leagueName).replace(/ /g, "_");
     const matchesList = Object.values(centralMatches || {});
 
-    // Kontrola dohrání 11. kola pro uzamčení soupisky a startovního nasazení
+    // Kontrola dohrání 9. kola pro uzamčení soupisky a startovního nasazení (Seeds)
     const lockMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === lockRoundNum);
     const lockFinished = lockMatches.length > 0 && lockMatches.every(z => 
         z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED"
@@ -5033,7 +5033,7 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
     let lockedData = lData.cupLock || null;
 
     if (lockFinished && !lockedData && zebricekPole.length > 0) {
-        console.log(`🔒 CUP LOCK TRIGGER [${leagueName}]: 11. kolo dohráno! Zamykám soupisku a nasazení pro Pohárovou arénu.`);
+        console.log(`🔒 CUP LOCK TRIGGER [${leagueName}]: 9. kolo dohráno! Zamykám nasazení ze základní ligy pro Pohárovou arénu.`);
         const seeds = {};
         zebricekPole.forEach((p, idx) => {
             seeds[p.uid] = idx + 1;
@@ -5049,16 +5049,17 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
 
     const isLocked = Boolean(lockedData && lockedData.seeds);
 
-    // Zápasy patřící do Pohárové arény (12.–17. kolo)
+    // Zápasy patřící do Pohárové arény (10.–17. kolo)
     const arenaMatches = matchesList.filter(z => {
         const kNum = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""));
         return kNum >= arenaStartRound && kNum <= arenaEndRound;
     });
 
-    // 🏟️ VÝPOČET POHÁROVÉ ARÉNY (Jedna společná tabulka všech hráčů)
+    // 🏟️ VÝPOČET POHÁROVÉ ARÉNY (8 kol ligové fáze od 0 bodů se sledováním nejlepšího kola)
     const arenaList = zebricekPole.map((p, idx) => {
         let pts = 0, exact = 0, topExact = 0, tend = 0;
         const seed = isLocked ? (lockedData.seeds[p.uid] || (idx + 1)) : (idx + 1);
+        const roundPtsMap = {};
 
         if (isLocked && arenaMatches.length > 0) {
             const uSouteze = RAM_USERS_TIPS[p.uid] || {};
@@ -5070,6 +5071,9 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
                 if (uTip) {
                     const b = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zap.vysledek_domaci, zap.vysledek_hoste, uTip.postup, zap.postup, zap.isPlayoff, zap.isTopMatch, leagueName);
                     pts += b;
+                    const kNum = String(zap.kolo || '').trim();
+                    roundPtsMap[kNum] = (roundPtsMap[kNum] || 0) + b;
+
                     const tD = parseInt(uTip.tip_domaci); const tH = parseInt(uTip.tip_hoste);
                     const rD = parseInt(zap.vysledek_domaci); const rH = parseInt(zap.vysledek_hoste);
                     if (tD === rD && tH === rH) {
@@ -5082,12 +5086,14 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
                 }
             });
         } else {
-            // V náhledu (před 12. kolem) zrcadlíme aktuální ligové body jako orientační formu
+            // V náhledu (před 10. kolem) zrcadlíme aktuální ligové body jako orientační formu
             pts = p.celkemBodu || 0;
             exact = p.presneVysledkyCount || 0;
             topExact = p.presneTopMatchesCount || 0;
             tend = p.spravneTendenceCount || 0;
         }
+
+        const bestRoundPts = Object.keys(roundPtsMap).length > 0 ? Math.max(...Object.values(roundPtsMap)) : 0;
 
         return {
             uid: p.uid,
@@ -5096,16 +5102,19 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
             pts: pts,
             exact: exact,
             topExact: topExact,
-            tend: tend
+            tend: tend,
+            bestRoundPts: bestRoundPts
         };
     });
 
-    // Seřazení Arény podle bodů a pomocných kritérií
+    // ⚖️ 5STUPŇOVÉ DETERMINISTICKÉ ŘAZENÍ ARÉNY:
+    // 1. Body v Aréně ➔ 2. Přesné výsledky ➔ 3. Přesné TOP ➔ 4. Tendence ➔ 5. Nejlepší kolo ➔ 6. Seed po 9. kole
     arenaList.sort((a, b) => {
         if (b.pts !== a.pts) return b.pts - a.pts;
         if (b.exact !== a.exact) return b.exact - a.exact;
         if (b.topExact !== a.topExact) return b.topExact - a.topExact;
         if (b.tend !== a.tend) return b.tend - a.tend;
+        if ((b.bestRoundPts || 0) !== (a.bestRoundPts || 0)) return (b.bestRoundPts || 0) - (a.bestRoundPts || 0);
         return a.seed - b.seed;
     });
 
