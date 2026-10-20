@@ -3642,6 +3642,76 @@ async function fetchSportApiLive(sport) {
     }
 }
 
+// ⏱️ FORMÁTOVAČ PŘESNÉHO HERNÍHO ČASU A PERIOD PRO 62px BOXÍK
+let RAM_LAST_LIVE_TICKS_STR = "";
+
+function urciLiveCasZapasu(ev, isHockey) {
+    if (!ev) return "🔴 LIVE";
+    const statusObj = ev.status || {};
+    const desc = String(statusObj.description || "").trim().toUpperCase();
+
+    // 1. HOKEJ
+    if (isHockey) {
+        if (desc.includes("1ST PAUSE") || (desc === "PAUSE" && ev.status?.period === 1)) return "1. PŘEST.";
+        if (desc.includes("2ND PAUSE") || (desc === "PAUSE" && ev.status?.period === 2)) return "2. PŘEST.";
+        if (desc.includes("PENALT") || desc.includes("SHOOTOUT") || desc === "AP" || desc === "SO") return "NÁJEZDY";
+
+        if (desc.includes("OVERTIME") || desc.includes("OT") || desc === "AOT") {
+            let otMin = 60;
+            if (typeof ev.time?.minute === "number") {
+                otMin = ev.time.minute > 60 ? ev.time.minute : 60 + ev.time.minute;
+            }
+            return `OT • ${otMin}'`;
+        }
+
+        let min = null;
+        if (typeof ev.time?.minute === "number") {
+            min = ev.time.minute;
+        } else if (typeof ev.time?.played === "number") {
+            min = Math.floor(ev.time.played / 60);
+        }
+
+        if (min !== null) {
+            if (desc.includes("2ND") && min <= 20) min += 20;
+            else if (desc.includes("3RD") && min <= 20) min += 40;
+            return `🔴 ${min}'`;
+        }
+        return "🔴 LIVE";
+    }
+
+    // 2. FOTBAL
+    if (desc === "HALFTIME" || desc === "HT" || desc.includes("HALF-TIME") || desc.includes("HALFTIME")) {
+        return "POLOČAS";
+    }
+    if (desc.includes("PENALT") || desc === "AP") {
+        return "PENALTY";
+    }
+    if (desc.includes("EXTRA") || desc === "AET") {
+        return "PRODLOUŽENÍ";
+    }
+
+    let min = null;
+    if (typeof ev.time?.minute === "number") {
+        min = ev.time.minute;
+    } else if (typeof ev.time?.played === "number") {
+        min = Math.floor(ev.time.played / 60);
+    } else if (ev.time?.currentPeriodStartTimestamp) {
+        const elapsedSec = Math.floor((Date.now() - (ev.time.currentPeriodStartTimestamp * 1000)) / 1000);
+        if (elapsedSec >= 0) {
+            const elapsedMin = Math.floor(elapsedSec / 60) + 1;
+            min = desc.includes("2ND") ? (45 + elapsedMin) : elapsedMin;
+        }
+    }
+
+    if (min !== null) {
+        if (desc.includes("1ST") && min > 45) return `🔴 45+${min - 45}'`;
+        if (desc.includes("2ND") && min > 90) return `🔴 90+${min - 90}'`;
+        return `🔴 ${min}'`;
+    }
+
+    return "🔴 LIVE";
+}
+
 // 🔍 Robustní párovací asistent týmů z live SofaScore feedu (S PŘÍSNÝM ČASOVÝM ZÁMKEM A BEZ OBRACENÍ POŘADATELSTVÍ)
 function najdiLiveZapasVeFeedu(staryZapas, liveEventsList) {
     const nasDom = PL_NORM(staryZapas.domaci);
@@ -3746,6 +3816,8 @@ async function providniApiHeartbeat() {
         if (maAktivniHokej) {
             liveHockeyEvents = await fetchSportApiLive("ice-hockey");
         }
+
+        const activeLiveTicks = {};
 
         for (const leagueName of SEZNAM_LIG) {
             const centralZapasy = RAM_CENTRAL_MATCHES[leagueName] || {};
@@ -4014,7 +4086,18 @@ async function providniApiHeartbeat() {
                       .set({ apiStatus: novyStatus, vysledek_domaci: golyDomaci, vysledek_hoste: golyHoste, postup: novyPostup }, { merge: true })
                       .catch(e => console.error(`❌ Firestore Sync Error:`, e.message));
                 }
+
+                if (stary.apiStatus === "IN_PLAY" || stary.apiStatus === "PAUSED") {
+                    activeLiveTicks[matchId] = urciLiveCasZapasu(liveItem, isHockey);
+                }
             }
+        }
+
+        // 📡 ODESLÁNÍ AKTUÁLNÍCH MINUT DO RTDB (0 FIRESTORE READS, 0 KČ)
+        const currentTicksStr = JSON.stringify(activeLiveTicks);
+        if (currentTicksStr !== RAM_LAST_LIVE_TICKS_STR) {
+            RAM_LAST_LIVE_TICKS_STR = currentTicksStr;
+            await rtdb.ref("live_ticks").set(activeLiveTicks).catch(e => console.error("❌ RTDB live_ticks error:", e.message));
         }
 
         if (zmeneneLigySet.size > 0) {
