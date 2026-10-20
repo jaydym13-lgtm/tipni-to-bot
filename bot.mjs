@@ -3646,7 +3646,7 @@ async function fetchSportApiLive(sport) {
 let RAM_LAST_LIVE_TICKS_STR = "";
 
 function urciLiveCasZapasu(ev, isHockey) {
-    if (!ev) return "🔴 LIVE";
+    if (!ev) return "LIVE";
     const statusObj = ev.status || {};
     const desc = String(statusObj.description || "").trim().toUpperCase();
 
@@ -3674,9 +3674,9 @@ function urciLiveCasZapasu(ev, isHockey) {
         if (min !== null) {
             if (desc.includes("2ND") && min <= 20) min += 20;
             else if (desc.includes("3RD") && min <= 20) min += 40;
-            return `🔴 ${min}'`;
+            return `${min}'`;
         }
-        return "🔴 LIVE";
+        return "LIVE";
     }
 
     // 2. FOTBAL
@@ -3704,12 +3704,12 @@ function urciLiveCasZapasu(ev, isHockey) {
     }
 
     if (min !== null) {
-        if (desc.includes("1ST") && min > 45) return `🔴 45+${min - 45}'`;
-        if (desc.includes("2ND") && min > 90) return `🔴 90+${min - 90}'`;
-        return `🔴 ${min}'`;
+        if (desc.includes("1ST") && min > 45) return `45+${min - 45}'`;
+        if (desc.includes("2ND") && min > 90) return `90+${min - 90}'`;
+        return `${min}'`;
     }
 
-    return "🔴 LIVE";
+    return "LIVE";
 }
 
 // 🔍 Robustní párovací asistent týmů z live SofaScore feedu (S PŘÍSNÝM ČASOVÝM ZÁMKEM A BEZ OBRACENÍ POŘADATELSTVÍ)
