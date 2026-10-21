@@ -5043,18 +5043,70 @@ async function startEnterpriseApplication() {
             return;
         }
 
-        // 🤖 BACKFILL ENDPOINT: Jednorázové férové dotipování celé odehrané historie i předsezónních bonusů pro bota TipniTo
+        // 🤖 BACKFILL ENDPOINT: Čistý dynamický model (žádné natvrdo zapsané názvy týmů ani hráčů)
         if (url === "/backfill-bot" || url.startsWith("/backfill-bot")) {
-            console.log("🤖 SERVISNÍ PING (/backfill-bot): Zahajuji deterministické dotipování historie a předsezónních bonusů pro bota TipniTo...");
+            console.log("🤖 SERVISNÍ PING (/backfill-bot): Zahajuji dynamické dopočtení zápasů a tržních bonusů pro bota TipniTo...");
             (async () => {
                 try {
                     await zajistiSystemovehoBotaVeFirestore();
 
-                    // 🎁 Předsezónní analytické bonusy bota (letní konsenzus kurzů před 1. kolem)
-                    const PREDSEZONNI_BONUSY = {
-                        "Premier_League": { vitez: "Man. City", strelec: "Haaland" },
-                        "Chance_Liga": { vitez: "Slavia", strelec: "Chytil" },
-                        "Tipsport_Extraliga": { vitez: "Pardubice", strelec: "Růžička", kanadske: "Sedlák" }
+                    // 🧮 AUTONOMNÍ ANALÝZA TRHU: Spočítá vítěze z kurzů rozpisu a střelce z komunitního konsenzu
+                    const spoctiDynamickeBonusyBota = (lName) => {
+                        const lKlic = String(lName).replace(/ /g, "_");
+                        const matches = Object.values(RAM_CENTRAL_MATCHES[lName] || {});
+                        
+                        // 1. Výpočet favorita ligy podle síly kurzů v celé sezóně
+                        const tymSilaMap = {};
+                        matches.forEach(m => {
+                            const o1 = parseFloat(m.odds?.['1'] || m.odds?.[1]);
+                            const o2 = parseFloat(m.odds?.['2'] || m.odds?.[2]);
+                            if (o1 && m.domaci) tymSilaMap[m.domaci] = (tymSilaMap[m.domaci] || 0) + (1 / o1);
+                            if (o2 && m.hoste) tymSilaMap[m.hoste] = (tymSilaMap[m.hoste] || 0) + (1 / o2);
+                        });
+
+                        let topTym = "";
+                        let maxSila = -1;
+                        Object.entries(tymSilaMap).forEach(([tym, sila]) => {
+                            if (sila > maxSila) { maxSila = sila; topTym = tym; }
+                        });
+
+                        // 2. Analýza komunitního konsenzu pro střelce a kanadské bodování
+                        const strelecCounts = {};
+                        const kanadskeCounts = {};
+
+                        Object.entries(RAM_USERS_TIPS || {}).forEach(([uUid, uData]) => {
+                            if (uUid === BOT_UID) return;
+                            const b = uData?.[lKlic]?.bonusy;
+                            if (!b) return;
+
+                            if (b.strelec && typeof b.strelec === 'string' && b.strelec.trim()) {
+                                const s = b.strelec.trim();
+                                strelecCounts[s] = (strelecCounts[s] || 0) + 1;
+                            }
+                            if (b.kanadske && typeof b.kanadske === 'string' && b.kanadske.trim()) {
+                                const k = b.kanadske.trim();
+                                kanadskeCounts[k] = (kanadskeCounts[k] || 0) + 1;
+                            }
+                        });
+
+                        const najdiNejcastejsi = (countsObj) => {
+                            let best = "";
+                            let maxC = -1;
+                            Object.entries(countsObj).forEach(([val, c]) => {
+                                if (c > maxC) { maxC = c; best = val; }
+                            });
+                            return best;
+                        };
+
+                        const topStrelec = najdiNejcastejsi(strelecCounts);
+                        const topKanadske = najdiNejcastejsi(kanadskeCounts);
+
+                        const resBonus = {};
+                        if (topTym) resBonus.vitez = topTym;
+                        if (topStrelec) resBonus.strelec = topStrelec;
+                        if (topKanadske && (lName.includes("hokej") || lName.includes("Extraliga"))) resBonus.kanadske = topKanadske;
+
+                        return Object.keys(resBonus).length > 0 ? resBonus : null;
                     };
 
                     let celkemZapsanoTipu = 0;
@@ -5078,18 +5130,14 @@ async function startEnterpriseApplication() {
                             }
                         });
 
-                        const bonusyKZapisu = PREDSEZONNI_BONUSY[ligaKlic] || null;
-                        if (bonusyKZapisu) {
-                            RAM_USERS_TIPS[BOT_UID][ligaKlic].bonusy = bonusyKZapisu;
+                        const dynamickeBonusy = spoctiDynamickeBonusyBota(leagueName);
+                        if (dynamickeBonusy) {
+                            RAM_USERS_TIPS[BOT_UID][ligaKlic].bonusy = dynamickeBonusy;
                         }
 
                         const updatePayload = {};
-                        if (Object.keys(noveTipyObj).length > 0) {
-                            updatePayload.tipy = noveTipyObj;
-                        }
-                        if (bonusyKZapisu) {
-                            updatePayload.bonusy = bonusyKZapisu;
-                        }
+                        if (Object.keys(noveTipyObj).length > 0) updatePayload.tipy = noveTipyObj;
+                        if (dynamickeBonusy) updatePayload.bonusy = dynamickeBonusy;
 
                         if (Object.keys(updatePayload).length > 0) {
                             await db.collection("users").doc(BOT_UID).collection("sezony").doc(SEZONA_ID).set({
@@ -5097,23 +5145,23 @@ async function startEnterpriseApplication() {
                                     [ligaKlic]: updatePayload
                                 }
                             }, { merge: true });
-                            console.log(`🤖 BACKFILL [${leagueName}]: Zapsáno ${Object.keys(noveTipyObj).length} tipů a předsezónní bonusy pro bota.`);
+                            console.log(`🤖 DYNAMICKÝ ENGINE [${leagueName}]: Zapsáno ${Object.keys(noveTipyObj).length} tipů a vypočtené bonusy:`, dynamickeBonusy);
                         }
                     }
 
-                    // Po zapsání tipů a bonusů okamžitě přepočítáme žebříčky a Síň slávy
+                    // Okamžitý přepočet žebříčků a Síně slávy na R2
                     for (const lName of SEZNAM_LIG) {
                         await rekonstruujAgregatyProLigu(lName, true);
                     }
                     await generujHallOfFameR2();
-                    console.log(`🏁 BACKFILL DOKONČEN: Bot TipniTo má úspěšně dotipováno celkem ${celkemZapsanoTipu} zápasů, předsezónní bonusy a naskočil do žebříčků.`);
+                    console.log(`🏁 DYNAMICKÝ BACKFILL DOKONČEN: Celkem ${celkemZapsanoTipu} tipů + matematické bonusy pro všechny soutěže.`);
                 } catch (e) {
-                    console.error("❌ BACKFILL BOT CHYBA:", e);
+                    console.error("❌ DYNAMICKÝ BACKFILL CHYBA:", e);
                 }
             })();
 
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Zpětné dotipování historie i předsezónních bonusů bota TipniTo spuštěno. Sleduj logy na Renderu.");
+            res.end("OK - Dynamický výpočet historie a bonusů bota spuštěn (0 hardcoded hodnot).");
             return;
         }
 
