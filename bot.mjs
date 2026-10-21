@@ -1115,8 +1115,8 @@ async function hydratujDataZFirestore() {
                     RAM_USERS_PROFILES[uid] = {
                         email: (data.email || "").trim().toLowerCase(),
                         nickname: data.nickname || (data.email || "").split('@')[0],
-                        leagues: data.leagues || []
-                    isBot: Boolean(data.isBot)
+                        leagues: data.leagues || [],
+                        isBot: Boolean(data.isBot)
                     };
                 }
             });
