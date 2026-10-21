@@ -5043,12 +5043,19 @@ async function startEnterpriseApplication() {
             return;
         }
 
-        // 🤖 BACKFILL ENDPOINT: Jednorázové férové dotipování celé odehrané historie pro bota TipniTo
+        // 🤖 BACKFILL ENDPOINT: Jednorázové férové dotipování celé odehrané historie i předsezónních bonusů pro bota TipniTo
         if (url === "/backfill-bot" || url.startsWith("/backfill-bot")) {
-            console.log("🤖 SERVISNÍ PING (/backfill-bot): Zahajuji deterministické dotipování všech odehraných kol pro bota TipniTo...");
+            console.log("🤖 SERVISNÍ PING (/backfill-bot): Zahajuji deterministické dotipování historie a předsezónních bonusů pro bota TipniTo...");
             (async () => {
                 try {
                     await zajistiSystemovehoBotaVeFirestore();
+
+                    // 🎁 Předsezónní analytické bonusy bota (letní konsenzus kurzů před 1. kolem)
+                    const PREDSEZONNI_BONUSY = {
+                        "Premier_League": { vitez: "Man. City", strelec: "Haaland" },
+                        "Chance_Liga": { vitez: "Slavia", strelec: "Chytil" },
+                        "Tipsport_Extraliga": { vitez: "Pardubice", strelec: "Růžička", kanadske: "Sedlák" }
+                    };
 
                     let celkemZapsanoTipu = 0;
                     for (const leagueName of SEZNAM_LIG) {
@@ -5057,7 +5064,7 @@ async function startEnterpriseApplication() {
                         const sport = (leagueName.includes("hokej") || leagueName.includes("Extraliga")) ? "ice-hockey" : "football";
 
                         if (!RAM_USERS_TIPS[BOT_UID]) RAM_USERS_TIPS[BOT_UID] = {};
-                        if (!RAM_USERS_TIPS[BOT_UID][ligaKlic]) RAM_USERS_TIPS[BOT_UID][ligaKlic] = { tipy: {} };
+                        if (!RAM_USERS_TIPS[BOT_UID][ligaKlic]) RAM_USERS_TIPS[BOT_UID][ligaKlic] = { tipy: {}, bonusy: {} };
 
                         const staryTipy = RAM_USERS_TIPS[BOT_UID][ligaKlic].tipy || {};
                         const noveTipyObj = {};
@@ -5071,31 +5078,42 @@ async function startEnterpriseApplication() {
                             }
                         });
 
+                        const bonusyKZapisu = PREDSEZONNI_BONUSY[ligaKlic] || null;
+                        if (bonusyKZapisu) {
+                            RAM_USERS_TIPS[BOT_UID][ligaKlic].bonusy = bonusyKZapisu;
+                        }
+
+                        const updatePayload = {};
                         if (Object.keys(noveTipyObj).length > 0) {
+                            updatePayload.tipy = noveTipyObj;
+                        }
+                        if (bonusyKZapisu) {
+                            updatePayload.bonusy = bonusyKZapisu;
+                        }
+
+                        if (Object.keys(updatePayload).length > 0) {
                             await db.collection("users").doc(BOT_UID).collection("sezony").doc(SEZONA_ID).set({
                                 souteze: {
-                                    [ligaKlic]: {
-                                        tipy: noveTipyObj
-                                    }
+                                    [ligaKlic]: updatePayload
                                 }
                             }, { merge: true });
-                            console.log(`🤖 BACKFILL [${leagueName}]: Zapsáno ${Object.keys(noveTipyObj).length} tipů pro bota.`);
+                            console.log(`🤖 BACKFILL [${leagueName}]: Zapsáno ${Object.keys(noveTipyObj).length} tipů a předsezónní bonusy pro bota.`);
                         }
                     }
 
-                    // Po zapsání tipů okamžitě přepočítáme žebříčky a Síň slávy
+                    // Po zapsání tipů a bonusů okamžitě přepočítáme žebříčky a Síň slávy
                     for (const lName of SEZNAM_LIG) {
                         await rekonstruujAgregatyProLigu(lName, true);
                     }
                     await generujHallOfFameR2();
-                    console.log(`🏁 BACKFILL DOKONČEN: Bot TipniTo má úspěšně dotipováno celkem ${celkemZapsanoTipu} zápasů a naskočil do žebříčků.`);
+                    console.log(`🏁 BACKFILL DOKONČEN: Bot TipniTo má úspěšně dotipováno celkem ${celkemZapsanoTipu} zápasů, předsezónní bonusy a naskočil do žebříčků.`);
                 } catch (e) {
                     console.error("❌ BACKFILL BOT CHYBA:", e);
                 }
             })();
 
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Zpětné dotipování bota TipniTo spuštěno. Sleduj logy na Renderu.");
+            res.end("OK - Zpětné dotipování historie i předsezónních bonusů bota TipniTo spuštěno. Sleduj logy na Renderu.");
             return;
         }
 
