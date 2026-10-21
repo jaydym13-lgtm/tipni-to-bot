@@ -756,6 +756,142 @@ const slovnikTymu = {
 
 const PL_NORM = (str) => String(str || '').toLowerCase().trim();
 
+// =========================================================================
+// 🤖 AUTONOMNÍ HRÁČ: BOT TIPNITO (MATEMATICKÝ KURZOVÝ BENCHMARK)
+// =========================================================================
+const BOT_UID = "bot_tipnito";
+
+function hashMatchSeed(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash);
+}
+
+// 🧮 Deterministický pravděpodobnostní generátor tipů (100% slepý vůči reálnému výsledku)
+function generujSlepyTipBota(matchId, odds, sport, isPlayoff = false) {
+    const isHockey = sport === "ice-hockey" || String(sport).includes("Extraliga") || String(sport).includes("hokej");
+    
+    // Extrakce kurzů Bet365 (s realistickými ligovými fallbacky při absenci kurzu)
+    const raw1 = parseFloat(odds?.['1'] || odds?.[1]) || (isHockey ? 2.20 : 2.10);
+    const rawX = parseFloat(odds?.['X'] || odds?.['x'] || odds?.[0]) || (isHockey ? 4.10 : 3.25);
+    const raw2 = parseFloat(odds?.['2'] || odds?.[2]) || (isHockey ? 2.65 : 3.20);
+
+    const p1 = 1 / raw1;
+    const pX = 1 / rawX;
+    const p2 = 1 / raw2;
+    const sumP = p1 + pX + p2;
+
+    const prob1 = p1 / sumP;
+    const probX = pX / sumP;
+    const prob2 = p2 / sumP;
+
+    // Deterministický seed fixovaný výhradně na ID zápasu (žádné Math.random())
+    const seed = hashMatchSeed(String(matchId) + "_TipniTo_Benchmark_2026") % 100;
+
+    let tipDomaci = 1;
+    let tipHoste = 0;
+    let tipPostup = "";
+
+    if (isHockey) {
+        // 🏒 HOKEJ: Vyšší gólový průměr, remízy v 60 min vyžadují volbu vítěze OT/SO
+        if (prob1 >= 0.58 || raw1 <= 1.55) {
+            // Výrazný domácí favorit
+            const candidates = [[4, 1], [4, 2], [5, 2], [3, 1]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        } else if (prob2 >= 0.55 || raw2 <= 1.65) {
+            // Výrazný hostující favorit
+            const candidates = [[1, 4], [2, 4], [2, 5], [1, 3]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        } else if (prob1 >= 0.44) {
+            // Mírný domácí favorit
+            const candidates = [[3, 2], [4, 2], [4, 3], [2, 1]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        } else if (prob2 >= 0.40) {
+            // Mírný hostující favorit
+            const candidates = [[2, 3], [2, 4], [3, 4], [1, 2]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        } else {
+            // Vyrovnaný duel -> remíza po 60 min
+            const candidates = [[2, 2], [3, 3], [2, 2], [1, 1]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+            tipPostup = raw1 <= raw2 ? "domaci" : "hoste";
+        }
+
+        if (tipDomaci === tipHoste && !tipPostup) {
+            tipPostup = raw1 <= raw2 ? "domaci" : "hoste";
+        }
+    } else {
+        // ⚽ FOTBAL: Precizní ligový rozptyl
+        if (prob1 >= 0.65 || raw1 <= 1.45) {
+            // Monstrózní domácí favorit (např. City, Real doma)
+            const candidates = [[2, 0], [3, 0], [2, 1], [3, 1]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        } else if (prob2 >= 0.60 || raw2 <= 1.55) {
+            // Monstrózní venkovní favorit
+            const candidates = [[0, 2], [0, 3], [1, 2], [1, 3]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        } else if (prob1 >= 0.48 || raw1 <= 1.95) {
+            // Běžný domácí favorit
+            const candidates = [[2, 1], [2, 0], [1, 0], [3, 1]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        } else if (prob2 >= 0.42 || raw2 <= 2.15) {
+            // Běžný hostující favorit
+            const candidates = [[1, 2], [0, 2], [0, 1], [1, 3]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        } else {
+            // Taktická bitva / Vyrovnaný kurz
+            const candidates = [[1, 1], [1, 1], [2, 1], [1, 2]];
+            const chosen = candidates[seed % candidates.length];
+            tipDomaci = chosen[0]; tipHoste = chosen[1];
+        }
+
+        if (isPlayoff && tipDomaci === tipHoste) {
+            tipPostup = raw1 <= raw2 ? "domaci" : "hoste";
+        }
+    }
+
+    return {
+        tip_domaci: tipDomaci,
+        tip_hoste: tipHoste,
+        postup: tipPostup,
+        matchId: matchId,
+        createdAt: new Date().toISOString()
+    };
+}
+
+// 🛡️ Garance existence systémového účtu bota ve Firestore (0 duplicit)
+async function zajistiSystemovehoBotaVeFirestore() {
+    try {
+        const botDoc = await db.collection("users").doc(BOT_UID).get();
+        if (!botDoc.exists) {
+            await db.collection("users").doc(BOT_UID).set({
+                nickname: "TipniTo",
+                email: "bot@tipnito.cz",
+                leagues: SEZNAM_LIG,
+                isAdmin: false,
+                isSuperAdmin: false,
+                isBot: true,
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            console.log("🤖 BOT TIPNITO: Systémový účet úspěšně zaregistrován do Firestore.");
+        }
+    } catch (e) {
+        console.error("❌ BOT TIPNITO: Selhala registrace profilu bota:", e.message);
+    }
+}
+
 // --- 🧮 VÝPOČET BODŮ ---
 const vypocitejBodyZapasuLocal = (tipDomaci, tipHoste, realDomaci, realHoste, tipPostup, realPostup, isPlayoff, isTopMatch = false, leagueName = "DEFAULT") => {
     const tDom = parseInt(tipDomaci); const tHos = parseInt(tipHoste);
@@ -3779,6 +3915,35 @@ async function providniApiHeartbeat() {
                     continue;
                 }
 
+                // 🤖 AUTOMATICKÝ TIP BOTA V ČASE T-1 MINUTA PŘED VÝKOPEM (Okno 0 až 4 minuty před startem)
+                const zbyvaDoVykopuMs = startMs - nyniMs;
+                const isT1Window = !isNaN(startMs) && zbyvaDoVykopuMs > 0 && zbyvaDoVykopuMs <= (4 * 60 * 1000);
+
+                if (isT1Window) {
+                    const ligaKlic = String(leagueName).replace(/ /g, "_");
+                    const botTipy = RAM_USERS_TIPS[BOT_UID]?.[ligaKlic]?.tipy || {};
+                    if (!botTipy[mId]) {
+                        const sport = (leagueName.includes("hokej") || leagueName.includes("Extraliga")) ? "ice-hockey" : "football";
+                        const novyTip = generujSlepyTipBota(mId, stary.odds, sport, stary.isPlayoff);
+
+                        if (!RAM_USERS_TIPS[BOT_UID]) RAM_USERS_TIPS[BOT_UID] = {};
+                        if (!RAM_USERS_TIPS[BOT_UID][ligaKlic]) RAM_USERS_TIPS[BOT_UID][ligaKlic] = { tipy: {} };
+                        RAM_USERS_TIPS[BOT_UID][ligaKlic].tipy[mId] = novyTip;
+
+                        db.collection("users").doc(BOT_UID).collection("sezony").doc(SEZONA_ID).set({
+                            souteze: {
+                                [ligaKlic]: {
+                                    tipy: {
+                                        [mId]: novyTip
+                                    }
+                                }
+                            }
+                        }, { merge: true }).catch(e => console.error("❌ BOT T-1 write error:", e.message));
+
+                        console.log(`🤖 BOT TIPNITO [T-1 ${leagueName}]: ${stary.domaci} vs ${stary.hoste} ➔ ${novyTip.tip_domaci}:${novyTip.tip_hoste} ${novyTip.postup ? `(${novyTip.postup})` : ''}`);
+                    }
+                }
+
                 if (isPastKickoff) {
                     console.log(`🔒 LOCK T-0 [${leagueName}]: Výkop zápasu ${stary.domaci} – ${stary.hoste}. Zmrazuji tipy!`);
                     stary.spyUploaded = true;
@@ -4724,8 +4889,9 @@ async function startEnterpriseApplication() {
         console.log("🗺️ INICIALIZACE: event_map.json na R2 chybí, stahuji a ukládám novou mapu...");
         await synchronizujSofaScoreEventMap();
     }
-    await nactiKurzyZR2();
+   await nactiKurzyZR2();
     await nactiProcessedDaysZR2();
+    await zajistiSystemovehoBotaVeFirestore();
 
     // 2. Teprve s plnou kurzovou pamětí provedeme startovní hydrataci a generování rozpisů
     await hydratujDataZFirestore();
@@ -4868,6 +5034,62 @@ async function startEnterpriseApplication() {
             })();
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
             res.end("OK - Kompletní přepočet žebříčků, rozpisů a natipovaných kol pro všechny ligy spuštěn.");
+            return;
+        }
+
+        // 🤖 BACKFILL ENDPOINT: Jednorázové férové dotipování celé odehrané historie pro bota TipniTo
+        if (url === "/backfill-bot" || url.startsWith("/backfill-bot")) {
+            console.log("🤖 SERVISNÍ PING (/backfill-bot): Zahajuji deterministické dotipování všech odehraných kol pro bota TipniTo...");
+            (async () => {
+                try {
+                    await zajistiSystemovehoBotaVeFirestore();
+
+                    let celkemZapsanoTipu = 0;
+                    for (const leagueName of SEZNAM_LIG) {
+                        const ligaKlic = String(leagueName).replace(/ /g, "_");
+                        const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
+                        const sport = (leagueName.includes("hokej") || leagueName.includes("Extraliga")) ? "ice-hockey" : "football";
+
+                        if (!RAM_USERS_TIPS[BOT_UID]) RAM_USERS_TIPS[BOT_UID] = {};
+                        if (!RAM_USERS_TIPS[BOT_UID][ligaKlic]) RAM_USERS_TIPS[BOT_UID][ligaKlic] = { tipy: {} };
+
+                        const staryTipy = RAM_USERS_TIPS[BOT_UID][ligaKlic].tipy || {};
+                        const noveTipyObj = {};
+
+                        Object.entries(centralMatches).forEach(([mId, z]) => {
+                            if (!staryTipy[mId]) {
+                                const t = generujSlepyTipBota(mId, z.odds, sport, z.isPlayoff);
+                                staryTipy[mId] = t;
+                                noveTipyObj[mId] = t;
+                                celkemZapsanoTipu++;
+                            }
+                        });
+
+                        if (Object.keys(noveTipyObj).length > 0) {
+                            await db.collection("users").doc(BOT_UID).collection("sezony").doc(SEZONA_ID).set({
+                                souteze: {
+                                    [ligaKlic]: {
+                                        tipy: noveTipyObj
+                                    }
+                                }
+                            }, { merge: true });
+                            console.log(`🤖 BACKFILL [${leagueName}]: Zapsáno ${Object.keys(noveTipyObj).length} tipů pro bota.`);
+                        }
+                    }
+
+                    // Po zapsání tipů okamžitě přepočítáme žebříčky a Síň slávy
+                    for (const lName of SEZNAM_LIG) {
+                        await rekonstruujAgregatyProLigu(lName, true);
+                    }
+                    await generujHallOfFameR2();
+                    console.log(`🏁 BACKFILL DOKONČEN: Bot TipniTo má úspěšně dotipováno celkem ${celkemZapsanoTipu} zápasů a naskočil do žebříčků.`);
+                } catch (e) {
+                    console.error("❌ BACKFILL BOT CHYBA:", e);
+                }
+            })();
+
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("OK - Zpětné dotipování bota TipniTo spuštěno. Sleduj logy na Renderu.");
             return;
         }
 
