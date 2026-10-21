@@ -1116,6 +1116,7 @@ async function hydratujDataZFirestore() {
                         email: (data.email || "").trim().toLowerCase(),
                         nickname: data.nickname || (data.email || "").split('@')[0],
                         leagues: data.leagues || []
+                    isBot: Boolean(data.isBot)
                     };
                 }
             });
@@ -1135,7 +1136,8 @@ async function hydratujDataZFirestore() {
                     RAM_USERS_PROFILES[uid] = {
                         email: (data.email || "").trim().toLowerCase(),
                         nickname: data.nickname || (data.email || "").split('@')[0],
-                        leagues: data.leagues || []
+                        leagues: data.leagues || [],
+                        isBot: Boolean(data.isBot)
                     };
                 } else {
                     delete RAM_USERS_PROFILES[uid];
@@ -1404,6 +1406,7 @@ async function generujHallOfFameR2() {
                 playersMap[p.uid] = {
                     uid: p.uid,
                     nickname: p.nickname || 'Hráč',
+                    isBot: Boolean(p.isBot),
                     leaguesCards: []
                 };
             }
@@ -1468,6 +1471,7 @@ async function generujHallOfFameR2() {
             nickname: p.nickname,
             masterOvr,
             tier,
+            isBot: Boolean(p.isBot),
             archetype: bestCard.archetype || 'TAK',
             archetypeName: bestCard.archetypeName || 'Taktik',
             specialization: `Specializace: ${bestLeague}`,
@@ -2516,7 +2520,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         mapaPrezdivek[p.email] = p.nickname;
         mapaPrezdivek[uid] = p.nickname;
         zebricekMapa[uid] = {
-            uid: uid, email: p.email, nickname: p.nickname, celkemBodu: 0, natipovaneVyhodnocene: 0, nenatipovaneVyhodnocene: 0, presneVysledkyCount: 0,
+            uid: uid, email: p.email, nickname: p.nickname, isBot: Boolean(p.isBot), celkemBodu: 0, natipovaneVyhodnocene: 0, nenatipovaneVyhodnocene: 0, presneVysledkyCount: 0,
             celkemBoduLive: 0, natipovaneVyhodnoceneLive: 0, nenatipovaneVyhodnoceneLive: 0, presneVysledkyCountLive: 0,
             bodyPoKolech: {}, nejStrelec: '–', vitezMs: '–', nejKanadske: '–', nejviceBoduVKole: 0
         };
@@ -2976,6 +2980,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
 
         return {
             uid: zebricekMapa[uid].uid, email: zebricekMapa[uid].email, nickname: zebricekMapa[uid].nickname,
+            isBot: Boolean(zebricekMapa[uid].isBot),
             celkemBodu: zebricekMapa[uid].celkemBodu, natipovaneVyhodnocene: zebricekMapa[uid].natipovaneVyhodnocene,
             nenatipovaneVyhodnocene: zebricekMapa[uid].nenatipovaneVyhodnocene, presneVysledkyCount: zebricekMapa[uid].presneVysledkyCount,
             presneTopMatchesCount: zebricekMapa[uid].presneTopMatchesCount || 0,
@@ -3003,6 +3008,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
 
         return {
             uid: zebricekMapa[uid].uid, email: zebricekMapa[uid].email, nickname: zebricekMapa[uid].nickname,
+            isBot: Boolean(zebricekMapa[uid].isBot),
             celkemBodu: zebricekMapa[uid].celkemBoduLive, natipovaneVyhodnocene: zebricekMapa[uid].natipovaneVyhodnoceneLive,
             nenatipovaneVyhodnocene: zebricekMapa[uid].nenatipovaneVyhodnoceneLive, presneVysledkyCount: zebricekMapa[uid].presneVysledkyCountLive,
             presneTopMatchesCount: zebricekMapa[uid].presneTopMatchesCountLive || 0,
