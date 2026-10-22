@@ -2206,7 +2206,7 @@ function spoctiRadarStatistikyBot(centralMatches, uzivateleProfily, uzivateleTip
             }
         });
 
-        const zapasLabel = `${dNazev} ${rDom} : ${rHos} ${hNazev}`;
+        const zapasLabel = `${dNazev} ${vysledekStr} ${hNazev}`;
         const koloLabel = zapas.kolo || "Šampionát";
 
         if (tipovaloLidi > 0 && hraciSBody.length === 0) {
