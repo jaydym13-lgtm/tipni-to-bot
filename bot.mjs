@@ -3854,26 +3854,50 @@ function urciLiveCasZapasu(ev, isHockey) {
     if (!ev) return "LIVE";
     const statusObj = ev.status || {};
     const desc = String(statusObj.description || "").trim().toUpperCase();
+    const statusType = String(statusObj.type || "").trim().toLowerCase();
 
     // 1. HOKEJ
     if (isHockey) {
-        if (desc.includes("1ST PAUSE") || (desc === "PAUSE" && ev.status?.period === 1)) return "1. PŘEST.";
-        if (desc.includes("2ND PAUSE") || (desc === "PAUSE" && ev.status?.period === 2)) return "2. PŘEST.";
-        if (desc.includes("PENALT") || desc.includes("SHOOTOUT") || desc === "AP" || desc === "SO") return "NÁJEZDY";
+        const hScore = ev.homeScore || {};
+        const aScore = ev.awayScore || {};
 
-        if (desc.includes("OVERTIME") || desc.includes("OT") || desc === "AOT") {
-            let otMin = 60;
-            if (typeof ev.time?.minute === "number") {
-                otMin = ev.time.minute > 60 ? ev.time.minute : 60 + ev.time.minute;
-            }
-            return `OT • ${otMin}'`;
-        }
+        const hasP1 = hScore.period1 !== undefined || aScore.period1 !== undefined;
+        const hasP2 = hScore.period2 !== undefined || aScore.period2 !== undefined;
+        const hasP3 = hScore.period3 !== undefined || aScore.period3 !== undefined;
 
         let min = null;
         if (typeof ev.time?.minute === "number") {
             min = ev.time.minute;
         } else if (typeof ev.time?.played === "number") {
             min = Math.floor(ev.time.played / 60);
+        }
+
+        // 🛡️ DETEKCE PŘESTÁVKY: API hlásí Pause a neprobíhá herní třetina
+        const jePauza = (desc.includes("PAUSE") || desc.includes("INTERMISSION") || statusType === "paused") && !desc.includes("PERIOD");
+
+        if (jePauza) {
+            // 1. přestávka: 1. třetina je dohraná, ale druhá ještě nezačala (nebo čas < 30 min)
+            if ((hasP1 && !hasP2) || (min !== null && min < 30)) return "1. PŘEST.";
+
+            // 2. přestávka: 2. třetina je dohraná, ale třetí ještě nezačala (nebo čas 30 až 55 min)
+            if ((hasP2 && !hasP3) || (min !== null && min >= 30 && min < 55)) return "2. PŘEST.";
+
+            // Pauza po 60 minutách před prodloužením
+            if (hasP3 || (min !== null && min >= 55)) return "PŘED OT";
+
+            return "PŘEST.";
+        }
+
+        if (desc.includes("PENALT") || desc.includes("SHOOTOUT") || desc === "AP" || desc === "SO" || statusType === "penalties") {
+            return "NÁJEZDY";
+        }
+
+        if (desc.includes("OVERTIME") || desc.includes("OT") || desc === "AOT" || statusType === "overtime") {
+            let otMin = 60;
+            if (typeof ev.time?.minute === "number") {
+                otMin = ev.time.minute > 60 ? ev.time.minute : 60 + ev.time.minute;
+            }
+            return `OT • ${otMin}'`;
         }
 
         if (min !== null) {
@@ -3885,13 +3909,13 @@ function urciLiveCasZapasu(ev, isHockey) {
     }
 
     // 2. FOTBAL
-    if (desc === "HALFTIME" || desc === "HT" || desc.includes("HALF-TIME") || desc.includes("HALFTIME")) {
+    if (desc === "HALFTIME" || desc === "HT" || desc.includes("HALF-TIME") || desc.includes("HALFTIME") || statusType === "halftime") {
         return "POLOČAS";
     }
-    if (desc.includes("PENALT") || desc === "AP") {
+    if (desc.includes("PENALT") || desc === "AP" || statusType === "penalties") {
         return "PENALTY";
     }
-    if (desc.includes("EXTRA") || desc === "AET") {
+    if (desc.includes("EXTRA") || desc === "AET" || statusType === "extratime") {
         return "PRODLOUŽENÍ";
     }
 
