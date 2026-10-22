@@ -4054,71 +4054,14 @@ async function providniApiHeartbeat() {
                 let lastEventsCache = null; // Stáhne /events/last/0 maximálně 1× pro celou ligu v tomto cyklu
 
                 for (const [matchId, stary] of Object.entries(centralZapasy)) {
-                // ⏱️ OCHRANNÁ 10MIN AUDITNÍ LHŮTA: Zápas ignorujeme, POKUD nečeká na 10minutové ověření
+                // ⏱️ 5MINUTOVÁ OCHRANNÁ LHŮTA (GRACE PERIOD):
+                // Pokud zápas skončil před více než 5 minutami, je definitivně uzavřen a ignorujeme ho.
                 if (stary.apiStatus === "FINISHED") {
-                    const cekaNaAudit = Boolean(stary.needsAudit && nyniMs >= (stary.auditAt || 0));
-                    if (!cekaNaAudit) continue;
-
-                    // Čas 10minutového auditu vypršel -> stáhneme /events/last/0 a ověříme definitivní výsledek
-                    const cfg = SOFASCORE_TOURNAMENTS[leagueName];
-                    if (cfg) {
-                        if (lastEventsCache === null) {
-                            try {
-                                lastEventsCache = await fetchSportApiTournamentEvents(leagueName, cfg, "last", false);
-                            } catch (e) {
-                                lastEventsCache = [];
-                            }
-                        }
-
-                        const auditedEvent = najdiLiveZapasVeFeedu(stary, lastEventsCache);
-                        if (auditedEvent) {
-                            const rawH = auditedEvent.homeTeam?.name || "";
-                            const normH = PL_NORM(slovnikTymu[rawH] || rawH);
-                            const nasDom = PL_NORM(stary.domaci);
-                            const isInverted = !(normH === nasDom || normH.includes(nasDom) || nasDom.includes(normH));
-
-                            const hScore = isInverted ? auditedEvent.awayScore : auditedEvent.homeScore;
-                            const aScore = isInverted ? auditedEvent.homeScore : auditedEvent.awayScore;
-
-                            let realDom = hScore?.current ?? stary.vysledek_domaci;
-                            let realHos = aScore?.current ?? stary.vysledek_hoste;
-                            let realPostup = "";
-
-                            if (isHockey) {
-                                const p1D = (hScore?.period1 || 0); const p2D = (hScore?.period2 || 0); const p3D = (hScore?.period3 || 0);
-                                const p1H = (aScore?.period1 || 0); const p2H = (aScore?.period2 || 0); const p3H = (aScore?.period3 || 0);
-                                const regDom = p1D + p2D + p3D;
-                                const regHos = p1H + p2H + p3H;
-                                if (regDom === regHos && (hScore?.current !== aScore?.current || auditedEvent.winnerCode)) {
-                                    realDom = regDom;
-                                    realHos = regHos;
-                                    const wCode = auditedEvent.winnerCode;
-                                    if (wCode === 1) realPostup = isInverted ? "hoste" : "domaci";
-                                    else if (wCode === 2) realPostup = isInverted ? "domaci" : "hoste";
-                                }
-                            }
-
-                            if (stary.vysledek_domaci !== realDom || stary.vysledek_hoste !== realHos || stary.postup !== realPostup) {
-                                console.log(`🚨 AUDIT KOREKCE PO 10 MINUTÁCH [${leagueName}]: Zápas ${stary.domaci} vs ${stary.hoste} opraven z ${stary.vysledek_domaci}:${stary.vysledek_hoste} (${stary.postup}) na ${realDom}:${realHos} (${realPostup})!`);
-                                stary.vysledek_domaci = realDom;
-                                stary.vysledek_hoste = realHos;
-                                stary.postup = realPostup;
-                                zmeneneLigySet.add(leagueName);
-
-                                db.collection("ligy").doc(leagueName)
-                                  .collection("sezony").doc(SEZONA_ID)
-                                  .collection("zapasy").doc(matchId)
-                                  .set({ vysledek_domaci: realDom, vysledek_hoste: realHos, postup: realPostup, apiStatus: "FINISHED" }, { merge: true })
-                                  .catch(() => {});
-                            } else {
-                                console.log(`🛡️ AUDIT POTVRZEN [${leagueName}]: Zápas ${stary.domaci} vs ${stary.hoste} (${realDom}:${realHos}) je po 10 min 100% stabilní.`);
-                            }
-                        }
+                    const finishedAgo = stary.finishedAt ? (nyniMs - stary.finishedAt) : Infinity;
+                    if (finishedAgo > 5 * 60 * 1000) {
+                        continue;
                     }
-
-                    delete stary.needsAudit;
-                    delete stary.auditAt;
-                    continue;
+                    // Během 5 minut po skončení zápas ještě necháváme projít k live feedu pro případ VAR / odvolaného gólu
                 }
 
                     const liveItem = poolHasEvents ? najdiLiveZapasVeFeedu(stary, livePool) : null;
@@ -4181,10 +4124,11 @@ async function providniApiHeartbeat() {
 
                                         console.log(`✅ ZÁPAS DOHRÁN [${leagueName}]: ${stary.domaci} ${gDom}:${gHos} ${stary.hoste} (FINISHED)`);
                                         stary.apiStatus = "FINISHED";
-                                        stary.vysledek_domaci = gDom;
-                                        stary.vysledek_hoste = gHos;
-                                        stary.postup = novyPostup;
-                                        zmeneneLigySet.add(leagueName);
+                                    stary.finishedAt = nyniMs;
+                                    stary.vysledek_domaci = gDom;
+                                    stary.vysledek_hoste = gHos;
+                                    stary.postup = novyPostup;
+                                    zmeneneLigySet.add(leagueName);
 
                                         db.collection("ligy").doc(leagueName)
                                             .collection("sezony").doc(SEZONA_ID)
@@ -4283,20 +4227,20 @@ async function providniApiHeartbeat() {
                 const postupSeZmenil = (stary.postup !== novyPostup);
 
                 if (skoreSeZmenilo || statusSeZmenil || postupSeZmenil) {
-                    console.log(`📡 SPORTAPI7 LIVE [${leagueName}]: ${stary.domaci} ${golyDomaci} : ${golyHoste} ${stary.hoste} (${novyStatus})`);
+                    if (stary.apiStatus === "FINISHED" && novyStatus === "IN_PLAY") {
+                        console.log(`🚨 VAR / ODVOLANÝ GÓL [${leagueName}]: Zápas ${stary.domaci} vs ${stary.hoste} se vrací do LIVE (${golyDomaci}:${golyHoste})!`);
+                    } else {
+                        console.log(`📡 SPORTAPI7 LIVE [${leagueName}]: ${stary.domaci} ${golyDomaci} : ${golyHoste} ${stary.hoste} (${novyStatus})`);
+                    }
                     stary.apiStatus = novyStatus;
                     stary.vysledek_domaci = golyDomaci;
                     stary.vysledek_hoste = golyHoste;
                     stary.postup = novyPostup;
-                    // ⏱️ NAPLÁNOVÁNÍ JEDNORÁZOVÉHO AUDITU ZA 10 MINUT PRO REMÍZY A TĚSNÉ ZÁPASY (O 1 GÓL)
+
                     if (novyStatus === "FINISHED") {
-                        const jeRemizaV60 = (golyDomaci === golyHoste);
-                        const jeTesnyZapas = Math.abs(golyDomaci - golyHoste) === 1;
-                        if (jeRemizaV60 || jeTesnyZapas || Boolean(novyPostup)) {
-                            stary.needsAudit = true;
-                            stary.auditAt = nyniMs + (10 * 60 * 1000);
-                            console.log(`⏱️ NAPLÁNOVÁN AUDIT ZA 10 MINUT: [${leagueName}] ${stary.domaci} vs ${stary.hoste}`);
-                        }
+                        if (!stary.finishedAt) stary.finishedAt = nyniMs;
+                    } else {
+                        delete stary.finishedAt;
                     }
 
                     zmeneneLigySet.add(leagueName);
