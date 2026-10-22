@@ -1466,25 +1466,28 @@ async function generujHallOfFameR2() {
             }
             playersMap[p.uid].leaguesCards.push({
                 leagueName: lName,
-                tiperCard: p.tiperCard
+                tiperCard: p.tiperCard,
+                odehranoZapasu: odehrano
             });
         });
     });
 
     const playersList = Object.values(playersMap).map(p => {
         const count = p.leaguesCards.length;
-        const sumOvr = p.leaguesCards.reduce((acc, c) => acc + (c.tiperCard.ovr || 0), 0);
-        const rawAvg = sumOvr / count;
 
-        // 🎯 KOEFICIENT VŠESTRANNOSTI (ZÁBĚROVÝ NÁSOBIČ PODLE POČTU HRANÝCH LIG)
-        let koef = 1.0;
-        if (count === 1) koef = 0.97;
-        else if (count === 2) koef = 0.99;
-        else if (count === 3) koef = 1.00;
-        else if (count === 4) koef = 1.01;
-        else if (count >= 5) koef = 1.02;
+        // ⚖️ ČISTÝ VÁŽENÝ PRŮMĚR PODLE SKUTEČNÉHO POČTU ODEHRANÝCH ZÁPASŮ (Každý zápas má stejnou hodnotu)
+        let totalWeightedOvr = 0;
+        let totalAllLeagueMatches = 0;
 
-        const masterOvr = Math.min(99, Math.round(rawAvg * koef));
+        p.leaguesCards.forEach(c => {
+            const zPocet = Math.max(1, c.odehranoZapasu || c.tiperCard?.backSide?.totalMatches || 1);
+            totalWeightedOvr += (c.tiperCard.ovr || 50) * zPocet;
+            totalAllLeagueMatches += zPocet;
+        });
+
+        const masterOvr = totalAllLeagueMatches > 0 
+            ? Math.min(99, Math.max(50, Math.round(totalWeightedOvr / totalAllLeagueMatches))) 
+            : 60;
 
         let bestLeague = p.leaguesCards[0].leagueName;
         let maxOvr = -1;
@@ -1599,11 +1602,21 @@ async function generujHallOfFameR2() {
             ContentType: "application/json",
             CacheControl: "public, max-age=10, must-revalidate"
         }));
-        console.log(`🏛️ R2 SÍŇ SLÁVY: Vygenerován oficiální žebříček pro ${playersList.length} hráčů.`);
-    } catch (err) {
-        console.error("❌ Selhalo uložení hall_of_fame.json do R2:", err.message);
+        // 📡 RTDB MAJÁK PRO MOBILNÍ TELEFONY (Okamžitá hydratace Síně slávy v mobilu)
+            try {
+                await rtdb.ref(`system/hof_pulse`).set({
+                    ts: Date.now(),
+                    sezonaId: SEZONA_ID
+                });
+            } catch (rtdbErr) {
+                console.warn("RTDB hof_pulse varování:", rtdbErr.message);
+            }
+
+            console.log(`🏛️ R2 SÍŇ SLÁVY: Vygenerován oficiální žebříček pro ${playersList.length} hráčů -> RTDB hof_pulse odeslán.`);
+        } catch (err) {
+            console.error("❌ Selhalo uložení hall_of_fame.json do R2:", err.message);
+        }
     }
-}
 
 // --- 🧮 AGREGÁTOR PAMĚTI ---
 async function rekonstruujAgregatyVsechny(forceWriteHistory = false, isStartup = false) {
@@ -3289,13 +3302,13 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         };
     };
 
-    const getLeagueLast3AvgBot = (isLive) => {
-        if (posl3KolaBot.length === 0) return 0;
+    const getLeagueLast5AvgBot = (isLive) => {
+        if (posl5KolaBot.length === 0) return 0;
         let sum = 0, count = 0;
         Object.values(zebricekMapa).forEach(u => {
             const bMap = isLive ? (u.bodyPoKolechLive || {}) : (u.bodyPoKolech || {});
             let uPts = 0;
-            posl3KolaBot.forEach(k => { uPts += (bMap[k] || 0); });
+            posl5KolaBot.forEach(k => { uPts += (bMap[k] || 0); });
             sum += uPts;
             count++;
         });
@@ -3434,17 +3447,17 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
             statClu = Math.min(99, Math.max(45, Math.round(tableBaseClu * 0.55 + topPerfClu * 0.45)));
         }
 
-        // --- 5. FOR (Forma): Poslední 3 odehraná kola vůči průměru ligy v těchto kolech ---
-        let userLast3Pts = 0;
-        posl3KolaBot.forEach(k => { userLast3Pts += (bodyKola[k] || 0); });
-        const leagueAvg3 = getLeagueLast3AvgBot(isLiveMode);
+        // --- 5. FOR (Forma): Posledních 5 odehraných kol vůči průměru ligy (hladký a stabilní vývoj) ---
+        let userLast5Pts = 0;
+        posl5KolaBot.forEach(k => { userLast5Pts += (bodyKola[k] || 0); });
+        const leagueAvg5 = getLeagueLast5AvgBot(isLiveMode);
         let statFor = 70;
-        if (leagueAvg3 > 0) {
-            const ratioFor = userLast3Pts / leagueAvg3;
+        if (leagueAvg5 > 0) {
+            const ratioFor = userLast5Pts / leagueAvg5;
             if (ratioFor >= 1.0) {
-                statFor = Math.round(70 + Math.min(25, (ratioFor - 1.0) * 45));
+                statFor = Math.round(70 + Math.min(25, (ratioFor - 1.0) * 35));
             } else {
-                statFor = Math.round(70 - Math.min(25, (1.0 - ratioFor) * 40));
+                statFor = Math.round(70 - Math.min(25, (1.0 - ratioFor) * 30));
             }
         }
         statFor = Math.min(99, Math.max(45, statFor));
@@ -3500,13 +3513,13 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
             }
         });
 
-        // --- VÁŽENÝ CELKOVÝ RATING (OVR) ---
+        // --- VYVÁŽENÝ CELKOVÝ RATING (OVR): Dlouhodobé atributy dominují, forma nepřetáčí žebříček za víkend ---
         const ovr = Math.min(99, Math.max(50, Math.round(
-            statPre * 0.25 +
-            statEfe * 0.20 +
-            statFor * 0.20 +
-            statClu * 0.15 +
-            statSta * 0.10 +
+            statPre * 0.30 +
+            statEfe * 0.25 +
+            statSta * 0.15 +
+            statClu * 0.10 +
+            statFor * 0.10 +
             statOdv * 0.10
         )));
 
