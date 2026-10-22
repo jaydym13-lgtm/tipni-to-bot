@@ -572,6 +572,64 @@ async function smartSyncKurzuHokej() {
     }
 }
 
+// 🧮 PŘEDPOČÍTÁNÍ SEZNAMU KOL PRO BLESKOVÝ FRONTEND (0ms LATENCE V MOBILU)
+function sestavKolaARozpis(centralMatches, zapasyMapaObohacena, timestampNow) {
+    const zapasyArr = Object.values(centralMatches).map(z => ({
+        ...z,
+        datumMs: Date.parse(z.datum) || 0
+    })).sort((a, b) => a.datumMs - b.datumMs);
+
+    const prelozFazi = (stage, kolo, isPlayoff) => {
+        const s = String(stage || '').toUpperCase();
+        if (s === 'LAST_32') return 'Šestnáctifinále';
+        if (s === 'LAST_16') return 'Osmifinále';
+        if (s === 'QUARTER_FINALS') return 'Čtvrtfinále';
+        if (s === 'SEMI_FINALS') return 'Semifinále';
+        if (s === 'THIRD_PLACE') return 'Zápas o 3. místo';
+        if (s === 'FINAL') return 'Finále';
+        if (isPlayoff) return 'Play-off';
+        const k = String(kolo || '').trim();
+        return (k && k !== 'Šampionát') ? k : 'Základní skupiny';
+    };
+
+    // 1. Kola výsledků (odehrané zápasy v obrácené chronologii)
+    const vyhodnocene = zapasyArr.filter(z => 
+        z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== 'IN_PLAY' && z.apiStatus !== 'PAUSED'
+    );
+    const listKolVysledku = vyhodnocene.map(z => prelozFazi(z.stage, z.kolo, z.isPlayoff));
+    const unikatniVysledky = [...new Set(listKolVysledku)].filter(k => String(k).trim() !== '');
+    const unikatniKolaVysledku = ['Poslední zápasy', ...unikatniVysledky.reverse()];
+
+    // 2. Kola programu (nadcházející zápasy seřazené podle nejbližšího termínu)
+    const now = Date.now();
+    const budouci = zapasyArr.filter(z => {
+        const jeVyhodnoceny = (z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== 'IN_PLAY' && z.apiStatus !== 'PAUSED');
+        const obaNeznamy = (z.domaci === 'Neznámý' && z.hoste === 'Neznámý');
+        const jeOdlozenBezTerminu = (z.apiStatus === 'POSTPONED' && (!z.datumMs || z.datumMs <= now));
+        return !jeVyhodnoceny && !obaNeznamy && !jeOdlozenBezTerminu;
+    });
+
+    const kolaProgramuPoradi = [];
+    const videno = new Set();
+    budouci.forEach(z => {
+        const nazev = prelozFazi(z.stage, z.kolo, z.isPlayoff);
+        const cisty = String(nazev).trim();
+        if (cisty && !videno.has(cisty)) {
+            videno.add(cisty);
+            kolaProgramuPoradi.push(cisty);
+        }
+    });
+    const unikatniKolaProgramu = ['Nadcházející zápasy', ...kolaProgramuPoradi];
+
+    return {
+        zapasyMapa: zapasyMapaObohacena,
+        unikatniKolaProgramu: unikatniKolaProgramu,
+        unikatniKolaVysledku: unikatniKolaVysledku,
+        hasMatches: Object.keys(centralMatches).length > 0,
+        aktualizovano: timestampNow
+    };
+}
+
 // 📦 AUTONOMNÍ ROZPIS PIPELINE: Aktualizuje POUZE rozpis na R2 a pošle puls (0 přepočtů bodů, 0 Síně slávy)
 async function aktualizujRozpisProLigu(leagueName) {
     const centralMatches = RAM_CENTRAL_MATCHES[leagueName] || {};
@@ -611,11 +669,7 @@ async function aktualizujRozpisProLigu(leagueName) {
         };
     });
 
-    const rozpisJson = {
-        zapasyMapa: zapasyMapaObohacena,
-        hasMatches: Object.keys(centralMatches).length > 0,
-        aktualizovano: timestampNow
-    };
+    const rozpisJson = sestavKolaARozpis(centralMatches, zapasyMapaObohacena, timestampNow);
 
     await uploadToR2(leagueName, "rozpis.json", rozpisJson);
 
@@ -3607,11 +3661,7 @@ async function rekonstruujAgregatyProLigu(leagueName, forceWriteHistory = false,
         };
     });
 
-    const rozpisJson = { 
-        zapasyMapa: zapasyMapaObohacena, 
-        hasMatches: hasMatches, 
-        aktualizovano: timestampNow 
-    };
+    const rozpisJson = sestavKolaARozpis(centralMatches, zapasyMapaObohacena, timestampNow);
 
     // 🛡️ KONTROLA OTISKU: Čistý a stabilní otisk z reálných herních dat (včetně kurzů 1-X-2)
     const cistaDataZapasu = Object.entries(centralMatches).map(([id, z]) => 
