@@ -5381,9 +5381,9 @@ function vyhodnotVitezePlayoffDuelu(p1, p2) {
 
 // 🔢 UNIVERZÁLNÍ VÝPOČET 3 POSTUPOVÝCH PÁSEM PRO LIBOVOLNÝ POČET HRÁČŮ (N)
 function spoctiPoharovaPasma(N) {
-    // Malé ligy do 10 lidí (výjimka na 2 pásma: TOP 6 má volno do ČF, 4 hrají předkolo)
+    // Malé ligy do 10 lidí (výjimka na 2 pásma: TOP 6 má volno do ČF, zbývající hrají předkolo)
     if (N <= 10) {
-        const dByes = Math.min(N - 2, 6);
+        const dByes = Math.min(Math.max(2, N - 4), 6);
         const pk = N - dByes;
         return {
             isTwoTier: true,
@@ -5396,39 +5396,45 @@ function spoctiPoharovaPasma(N) {
         };
     }
 
-    // Určení cílové hlavní fáze M (8 do 15 hráčů, 16 pro 16-32 hráčů, 32 pro > 32 hráčů)
+    // Určení cílové hlavní fáze M (8 pro do 15 hráčů, 16 pro 16-32 hráčů, 32 pro > 32 hráčů)
     let M = 16;
     if (N <= 15) M = 8;
     else if (N <= 32) M = 16;
     else M = 32;
 
-    let D = 8;
-    if (M === 8) {
-        D = N <= 12 ? 6 : 4;
-    } else if (M === 16) {
-        D = 8; // Pro 27 lidí (Chance Liga): D=8 (TOP 8), S=13 (9-21), P1=6 (22-27)
-    } else {
-        if (N <= 55) D = 16;
-        else if (N <= 75) D = 8;
-        else D = 4;
+    const minD = 2 * M - N + 1;
+    const maxD = Math.floor((4 * M - N - 1) / 3);
+
+    // Pokud je rozsah platný, vybereme vyvážený počet Double Byes (ideální střed rozptylu)
+    if (minD <= maxD) {
+        const idealD = Math.floor((5 * M - 2 * N) / 3);
+        const D = Math.max(minD, Math.min(maxD, idealD));
+        const W1 = N - 2 * M + D;
+        const P1 = 2 * W1;
+        const S = 4 * M - 3 * D - N;
+
+        return {
+            isTwoTier: false,
+            targetM: M,
+            doubleByesCount: D,
+            singleByesCount: S,
+            predkoloCount: P1,
+            numPredkolo1Duels: W1,
+            numPredkolo2Duels: M - D
+        };
     }
 
-    let W1 = N - 2 * M + D;
-    if (W1 < 0) {
-        D = 2 * M - N;
-        W1 = 0;
-    }
-    const S = 2 * (M - D) - W1;
-    const P1 = 2 * W1;
-
+    // Fallback na 2 pásma (pokud N neumožňuje 3 plnohodnotná patra)
+    const dByes = 2 * M - N;
+    const pk = 2 * (N - M);
     return {
-        isTwoTier: false,
+        isTwoTier: true,
         targetM: M,
-        doubleByesCount: D,
-        singleByesCount: S,
-        predkoloCount: P1,
-        numPredkolo1Duels: W1,
-        numPredkolo2Duels: M - D
+        doubleByesCount: dByes,
+        singleByesCount: 0,
+        predkoloCount: pk,
+        numPredkolo1Duels: Math.floor(pk / 2),
+        numPredkolo2Duels: 0
     };
 }
 
