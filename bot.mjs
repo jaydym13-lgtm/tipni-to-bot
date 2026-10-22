@@ -5379,41 +5379,91 @@ function vyhodnotVitezePlayoffDuelu(p1, p2) {
     return seed1 <= seed2 ? p1.uid : p2.uid;
 }
 
-// 🗓️ Elastický generátor kalendáře Play-off (vždy cílí na Grand Finále ve 30. kole)
-function spoctiRozvrhPlayoff(T, hasPredkolo) {
-    // Standardní větev: T = 16 nebo T = 8 (do 32 hráčů)
-    if (T <= 16) {
+// 🔢 UNIVERZÁLNÍ VÝPOČET 3 POSTUPOVÝCH PÁSEM PRO LIBOVOLNÝ POČET HRÁČŮ (N)
+function spoctiPoharovaPasma(N) {
+    // Malé ligy do 10 lidí (výjimka na 2 pásma: TOP 6 má volno do ČF, 4 hrají předkolo)
+    if (N <= 10) {
+        const dByes = Math.min(N - 2, 6);
+        const pk = N - dByes;
         return {
-            final: 30,
-            sf: [27, 28],
-            qf: [25, 26],
-            of: [23, 24],
-            predkolo: hasPredkolo ? [21, 22] : null,
-            r32: null,
-            r64: null
+            isTwoTier: true,
+            targetM: 8,
+            doubleByesCount: dByes,
+            singleByesCount: 0,
+            predkoloCount: pk,
+            numPredkolo1Duels: Math.floor(pk / 2),
+            numPredkolo2Duels: 0
         };
     }
-    // Střední větev: T = 32 (33 až 64 hráčů)
-    if (T === 32) {
+
+    // Určení cílové hlavní fáze M (8 do 15 hráčů, 16 pro 16-32 hráčů, 32 pro > 32 hráčů)
+    let M = 16;
+    if (N <= 15) M = 8;
+    else if (N <= 32) M = 16;
+    else M = 32;
+
+    let D = 8;
+    if (M === 8) {
+        D = N <= 12 ? 6 : 4;
+    } else if (M === 16) {
+        D = 8; // Pro 27 lidí (Chance Liga): D=8 (TOP 8), S=13 (9-21), P1=6 (22-27)
+    } else {
+        if (N <= 55) D = 16;
+        else if (N <= 75) D = 8;
+        else D = 4;
+    }
+
+    let W1 = N - 2 * M + D;
+    if (W1 < 0) {
+        D = 2 * M - N;
+        W1 = 0;
+    }
+    const S = 2 * (M - D) - W1;
+    const P1 = 2 * W1;
+
+    return {
+        isTwoTier: false,
+        targetM: M,
+        doubleByesCount: D,
+        singleByesCount: S,
+        predkoloCount: P1,
+        numPredkolo1Duels: W1,
+        numPredkolo2Duels: M - D
+    };
+}
+
+// 🗓️ Elastický generátor kalendáře Play-off (cílí na Grand Finále ve 30. kole)
+function spoctiRozvrhPlayoff(targetM, hasP1, hasP2) {
+    if (targetM === 8) {
+        return {
+            final: 30,
+            sf: [28, 29],
+            qf: [26, 27],
+            predkolo2: hasP2 ? [24, 25] : null,
+            predkolo1: hasP1 ? [22, 23] : null,
+            of: null,
+            r32: null
+        };
+    }
+    if (targetM === 16) {
         return {
             final: 30,
             sf: [28, 29],
             qf: [26, 27],
             of: [24, 25],
-            r32: [22, 23],
-            predkolo: hasPredkolo ? [20, 21] : null,
-            r64: null
+            predkolo2: hasP2 ? [22, 23] : null,
+            predkolo1: hasP1 ? [20, 21] : null,
+            r32: null
         };
     }
-    // Mamutí větev: T = 64 (65 až 128 hráčů)
     return {
         final: 30,
         sf: [28, 29],
         qf: [26, 27],
         of: [24, 25],
         r32: [22, 23],
-        r64: [20, 21],
-        predkolo: hasPredkolo ? [18, 19] : null
+        predkolo2: hasP2 ? [20, 21] : null,
+        predkolo1: hasP1 ? [18, 19] : null
     };
 }
 
@@ -5529,16 +5579,8 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
     const N = arenaList.length;
     if (N < 4) return;
 
-    // 🔢 Výpočet cílové mocniny dvou a postupových pásem
-    let T = 16;
-    if (N <= 16) T = 8;
-    else if (N <= 32) T = 16;
-    else if (N <= 64) T = 32;
-    else T = 64;
-
-    const byesCount = Math.max(0, 2 * T - N); // Královská volna pro elitu
-    const predkoloPlayersCount = 2 * (N - T); // Hráči do předkola
-    const numPredkoloDuels = N - T;
+    // 🔢 Výpočet 3 postupových pásem
+    const pasma = spoctiPoharovaPasma(N);
 
     // Kontrola, zda je kompletně dohráno 17. kolo (konec Arény)
     const r17Matches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === arenaEndRound);
@@ -5546,7 +5588,7 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
 
     let playoffData = null;
     if (r17Finished) {
-        playoffData = sestavElastickePlayoff(leagueName, arenaList, T, byesCount, numPredkoloDuels, matchesList);
+        playoffData = sestavElastickePlayoff(leagueName, arenaList, pasma, matchesList);
     }
 
     const cupJson = {
@@ -5556,9 +5598,11 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
         qualificationEndRound: lockRoundNum,
         arenaStartRound: arenaStartRound,
         arenaEndRound: arenaEndRound,
-        byesCount: byesCount,
-        predkoloCount: predkoloPlayersCount,
-        targetStageSize: T,
+        byesCount: pasma.doubleByesCount,
+        doubleByesCount: pasma.doubleByesCount,
+        singleByesCount: pasma.singleByesCount,
+        predkoloCount: pasma.predkoloCount,
+        targetStageSize: pasma.targetM,
         arena: arenaList,
         playoff: playoffData,
         aktualizovano: new Date().toISOString()
@@ -5568,11 +5612,12 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
 }
 
 // 🌳 ELASTICKÝ BRACKET GENERÁTOR S KRÁLOVSKÝMI VOLNY A GRAND SLAM SEEDINGEM
-function sestavElastickePlayoff(leagueName, arenaList, T, byesCount, numPredkoloDuels, matchesList) {
+function sestavElastickePlayoff(leagueName, arenaList, pasma, matchesList) {
     const ligaKlic = String(leagueName).replace(/ /g, '_');
     const N = arenaList.length;
-    const hasPredkolo = numPredkoloDuels > 0;
-    const schedule = spoctiRozvrhPlayoff(T, hasPredkolo);
+    const hasP1 = pasma.numPredkolo1Duels > 0;
+    const hasP2 = pasma.numPredkolo2Duels > 0;
+    const schedule = spoctiRozvrhPlayoff(pasma.targetM, hasP1, hasP2);
 
     const getPlayerRoundStats = (uid, roundNum) => {
         if (!uid) return { pts: 0, exact: 0, topExact: 0, tend: 0, isStarted: false };
@@ -5645,44 +5690,82 @@ function sestavElastickePlayoff(leagueName, arenaList, T, byesCount, numPredkolo
         };
     };
 
-    // Přiřazení indexu 1..N jako konečného pořadí v Aréně
     const fullSeeding = arenaList.map((p, idx) => ({ ...p, arenaRank: idx + 1 }));
     const rounds = [];
 
-    // 🥊 FÁZE 1: PŘEDKOLO (pokud máme hráče navíc nad cílovou velikost T)
-    const predkoloWinners = [];
-    if (hasPredkolo && schedule.predkolo) {
-        const pkDuels = [];
-        for (let i = 0; i < numPredkoloDuels; i++) {
-            const p1 = fullSeeding[byesCount + i];
+    // 🥊 FÁZE 1: 1. PŘEDKOLO (pouze pro Tier 3, hrají hned)
+    const p1Winners = [];
+    if (hasP1 && schedule.predkolo1) {
+        const p1Duels = [];
+        const t3Start = pasma.doubleByesCount + pasma.singleByesCount;
+        for (let i = 0; i < pasma.numPredkolo1Duels; i++) {
+            const p1 = fullSeeding[t3Start + i];
             const p2 = fullSeeding[N - 1 - i];
-            const duel = buildDuel(p1, p2, schedule.predkolo[0], schedule.predkolo[1], `Předkolo • Duel ${i + 1}`);
-            pkDuels.push(duel);
-            if (duel.winner) predkoloWinners.push(duel.winner);
+            const duel = buildDuel(p1, p2, schedule.predkolo1[0], schedule.predkolo1[1], `1. Předkolo • Duel ${i + 1}`);
+            p1Duels.push(duel);
+            if (duel.winner) p1Winners.push(duel.winner);
         }
         rounds.push({
-            name: `🥊 PŘEDKOLO (${schedule.predkolo[0]}. & ${schedule.predkolo[1]}. KOLO)`,
-            info: `${numPredkoloDuels} duelů na odvety (${byesCount} hráčů má volný los)`,
-            duels: pkDuels
+            name: `🥊 1. PŘEDKOLO (${schedule.predkolo1[0]}. & ${schedule.predkolo1[1]}. KOLO)`,
+            info: `${pasma.numPredkolo1Duels} duelů na odvety (${pasma.predkoloCount} hráčů ze dna Arény)`,
+            duels: p1Duels
         });
     }
 
-    // Elita s Královským volnem (odpočívá a nastupuje rovnou do hlavní fáze)
-    const directQualifiers = fullSeeding.slice(0, byesCount);
-    const mainField = [...directQualifiers, ...predkoloWinners];
-    mainField.sort((a, b) => (a.arenaRank || 999) - (b.arenaRank || 999));
+    // ⭐ FÁZE 2: 2. PŘEDKOLO (Tier 2 Single Bye + postupující z 1. předkola)
+    const p2Winners = [];
+    if (hasP2 && schedule.predkolo2) {
+        const t2Players = fullSeeding.slice(pasma.doubleByesCount, pasma.doubleByesCount + pasma.singleByesCount);
+        const p2Field = [...t2Players, ...p1Winners].sort((a, b) => (a.arenaRank || 999) - (b.arenaRank || 999));
+        const p2Duels = [];
+        const numP2 = pasma.numPredkolo2Duels;
+        for (let i = 0; i < numP2; i++) {
+            const p1 = p2Field[i] || null;
+            const p2 = p2Field[p2Field.length - 1 - i] || null;
+            const duel = buildDuel(p1, p2, schedule.predkolo2[0], schedule.predkolo2[1], `2. Předkolo • Duel ${i + 1}`);
+            p2Duels.push(duel);
+            if (duel.winner) p2Winners.push(duel.winner);
+        }
+        rounds.push({
+            name: `⭐ 2. PŘEDKOLO (${schedule.predkolo2[0]}. & ${schedule.predkolo2[1]}. KOLO)`,
+            info: `${numP2} duelů na odvety (${numP2 * 2} hráčů • zapojení Pohárového volna)`,
+            duels: p2Duels
+        });
+    }
 
-    // 🏆 FÁZE 2: OSMIFINÁLE (pokud T = 16)
+    // 👑 FÁZE 3: HLAVNÍ FÁZE (Tier 1 Double Bye + vítězové 2. předkola)
+    const doubleByesPlayers = fullSeeding.slice(0, pasma.doubleByesCount);
+    const mainField = [...doubleByesPlayers, ...(hasP2 ? p2Winners : (hasP1 ? p1Winners : []))]
+        .sort((a, b) => (a.arenaRank || 999) - (b.arenaRank || 999));
+
+    // ŠESTNÁCTIFINÁLE (pro M = 32)
+    let r32Duels = [];
+    if (pasma.targetM === 32 && schedule.r32) {
+        for (let i = 0; i < 16; i++) {
+            const p1 = mainField[i] || null;
+            const p2 = mainField[31 - i] || null;
+            r32Duels.push(buildDuel(p1, p2, schedule.r32[0], schedule.r32[1], `1/16 finále • Duel ${i + 1}`));
+        }
+        rounds.push({
+            name: `🏆 ŠESTNÁCTIFINÁLE (${schedule.r32[0]}. & ${schedule.r32[1]}. KOLO)`,
+            info: "16 duelů na odvety (32 hráčů)",
+            duels: r32Duels
+        });
+    }
+
+    // OSMIFINÁLE (pro M >= 16)
     let ofDuels = [];
-    if (T === 16 && schedule.of) {
-        // Grand Slam turnajové párování (1 a 2 se potkají až ve finále)
+    if (pasma.targetM >= 16 && schedule.of) {
+        const ofField = pasma.targetM === 32
+            ? r32Duels.map(d => d.winner).filter(Boolean)
+            : mainField;
         const pairings16 = [
             [0, 15], [7, 8], [3, 12], [4, 11],
             [1, 14], [6, 9], [2, 13], [5, 10]
         ];
         ofDuels = pairings16.map((pair, idx) => {
-            const p1 = mainField[pair[0]] || null;
-            const p2 = mainField[pair[1]] || null;
+            const p1 = ofField[pair[0]] || null;
+            const p2 = ofField[pair[1]] || null;
             return buildDuel(p1, p2, schedule.of[0], schedule.of[1], `Osmifinále • Duel ${idx + 1}`);
         });
         rounds.push({
@@ -5692,9 +5775,9 @@ function sestavElastickePlayoff(leagueName, arenaList, T, byesCount, numPredkolo
         });
     }
 
-    // 👑 FÁZE 3: ČTVRTFINÁLE (TOP 8)
+    // ČTVRTFINÁLE (TOP 8)
     let qfField = [];
-    if (T === 16) {
+    if (pasma.targetM >= 16) {
         qfField = ofDuels.map(d => d.winner).filter(Boolean);
     } else {
         qfField = mainField;
@@ -5714,7 +5797,7 @@ function sestavElastickePlayoff(leagueName, arenaList, T, byesCount, numPredkolo
         });
     }
 
-    // 🔥 FÁZE 4: SEMIFINÁLE (TOP 4)
+    // SEMIFINÁLE (TOP 4)
     const sfField = qfDuels.map(d => d.winner).filter(Boolean);
     const sfDuels = [];
     if (schedule.sf) {
@@ -5728,7 +5811,7 @@ function sestavElastickePlayoff(leagueName, arenaList, T, byesCount, numPredkolo
         });
     }
 
-    // 🏆 FÁZE 5: GRAND FINÁLE (30. KOLO - 1 ROZHODUJÍCÍ ZÁPAS O POHÁR)
+    // GRAND FINÁLE (30. KOLO - 1 zápas ALL-IN)
     const finalist1 = sfDuels[0]?.winner || null;
     const finalist2 = sfDuels[1]?.winner || null;
     const finalDuel = buildDuel(finalist1, finalist2, schedule.final, null, "Grand Finále", true);
@@ -5739,8 +5822,10 @@ function sestavElastickePlayoff(leagueName, arenaList, T, byesCount, numPredkolo
     });
 
     return {
-        byesCount: byesCount,
-        targetSize: T,
+        byesCount: pasma.doubleByesCount,
+        doubleByesCount: pasma.doubleByesCount,
+        singleByesCount: pasma.singleByesCount,
+        targetSize: pasma.targetM,
         rounds: rounds
     };
 }
