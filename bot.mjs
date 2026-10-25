@@ -5537,16 +5537,26 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
             const uTips = (uSouteze[ligaKlic] && uSouteze[ligaKlic].tipy) ? uSouteze[ligaKlic].tipy : {};
 
             arenaMatches.forEach(zap => {
-                if (zap.vysledek_domaci === undefined || zap.vysledek_domaci === null) return;
+                // 🛡️ STRIKTNÍ VYHODNOCENÍ: Pouze řádně ukončené zápasy (žádné live body v Aréně)
+                const isEvaluated = (zap.apiStatus === "FINISHED") || (
+                    zap.vysledek_domaci !== undefined && zap.vysledek_domaci !== null &&
+                    zap.vysledek_hoste !== undefined && zap.vysledek_hoste !== null &&
+                    zap.apiStatus !== "IN_PLAY" && zap.apiStatus !== "PAUSED" &&
+                    zap.apiStatus !== "POSTPONED" && zap.apiStatus !== "SCHEDULED"
+                );
+                if (!isEvaluated) return;
+
                 const uTip = uTips[zap.id || zap.matchId];
-                if (uTip) {
+                const hasTip = uTip && uTip.tip_domaci !== undefined && uTip.tip_domaci !== null && String(uTip.tip_domaci).trim() !== '';
+
+                if (hasTip) {
                     const b = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zap.vysledek_domaci, zap.vysledek_hoste, uTip.postup, zap.postup, zap.isPlayoff, zap.isTopMatch, leagueName);
                     pts += b;
                     const kNum = String(zap.kolo || '').trim();
                     roundPtsMap[kNum] = (roundPtsMap[kNum] || 0) + b;
 
-                    const tD = parseInt(uTip.tip_domaci); const tH = parseInt(uTip.tip_hoste);
-                    const rD = parseInt(zap.vysledek_domaci); const rH = parseInt(zap.vysledek_hoste);
+                    const tD = parseInt(uTip.tip_domaci, 10); const tH = parseInt(uTip.tip_hoste, 10);
+                    const rD = parseInt(zap.vysledek_domaci, 10); const rH = parseInt(zap.vysledek_hoste, 10);
                     if (tD === rD && tH === rH) {
                         exact++;
                         if (zap.isTopMatch) topExact++;
@@ -5554,6 +5564,11 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
                     if ((tD > tH && rD > rH) || (tD < tH && rD < rH) || (tD === tH && rD === rH)) {
                         tend++;
                     }
+                } else {
+                    const penalty = pravidlaLigi.penaltyNenatipovano !== undefined ? pravidlaLigi.penaltyNenatipovano : -1;
+                    pts += penalty;
+                    const kNum = String(zap.kolo || '').trim();
+                    roundPtsMap[kNum] = (roundPtsMap[kNum] || 0) + penalty;
                 }
             });
         } else {
