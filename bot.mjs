@@ -5491,10 +5491,11 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
     const arenaEndRound = 17;
 
     const ligaKlic = String(leagueName).replace(/ /g, "_");
+    const pravidlaLigy = PRAVIDLA_LIG[leagueName] || PRAVIDLA_LIG["DEFAULT"];
     const matchesList = Object.entries(centralMatches || {}).map(([id, z]) => ({ ...z, id, matchId: id }));
 
     // Kontrola dohrání 9. kola pro uzamčení soupisky a startovního nasazení (Seeds)
-    const lockMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, '')) === lockRoundNum);
+    const lockMatches = matchesList.filter(z => parseInt(String(z.kolo || '').replace(/[^0-9]/g, ''), 10) === lockRoundNum);
     const lockFinished = lockMatches.length > 0 && lockMatches.every(z => 
         z.vysledek_domaci !== undefined && z.vysledek_domaci !== null && z.apiStatus !== "IN_PLAY" && z.apiStatus !== "PAUSED"
     );
@@ -5520,10 +5521,10 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
 
     const isLocked = Boolean(lockedData && lockedData.seeds);
 
-    // Zápasy patřící do Pohárové arény (10.–17. kolo)
+    // Zápasy patřící do Pohárové arény (výhradně 10.–17. kolo)
     const arenaMatches = matchesList.filter(z => {
-        const kNum = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""));
-        return kNum >= arenaStartRound && kNum <= arenaEndRound;
+        const kNum = parseInt(String(z.kolo || "").replace(/[^0-9]/g, ""), 10);
+        return !isNaN(kNum) && kNum >= arenaStartRound && kNum <= arenaEndRound;
     });
 
     // 🏟️ VÝPOČET POHÁROVÉ ARÉNY (8 kol ligové fáze od 0 bodů se sledováním nejlepšího kola)
@@ -5547,7 +5548,7 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
                 if (!isEvaluated) return;
 
                 const uTip = uTips[zap.id || zap.matchId];
-                const hasTip = uTip && uTip.tip_domaci !== undefined && uTip.tip_domaci !== null && String(uTip.tip_domaci).trim() !== '';
+                const hasTip = Boolean(uTip && uTip.tip_domaci !== undefined && uTip.tip_domaci !== null && String(uTip.tip_domaci).trim() !== '');
 
                 if (hasTip) {
                     const b = vypocitejBodyZapasuLocal(uTip.tip_domaci, uTip.tip_hoste, zap.vysledek_domaci, zap.vysledek_hoste, uTip.postup, zap.postup, zap.isPlayoff, zap.isTopMatch, leagueName);
@@ -5565,7 +5566,7 @@ async function rekonstruujPoharProLigu(leagueName, zebricekPole, centralMatches)
                         tend++;
                     }
                 } else {
-                    const penalty = pravidlaLigi.penaltyNenatipovano !== undefined ? pravidlaLigi.penaltyNenatipovano : -1;
+                    const penalty = pravidlaLigy.penaltyNenatipovano || 0;
                     pts += penalty;
                     const kNum = String(zap.kolo || '').trim();
                     roundPtsMap[kNum] = (roundPtsMap[kNum] || 0) + penalty;
