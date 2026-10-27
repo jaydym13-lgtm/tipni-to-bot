@@ -399,8 +399,8 @@ async function ulozKurzyDoR2() {
     }
 }
 
-// ⚽ SMART SYNC PLÁNOVAČ: POUZE PRO FOTBAL (Nedotčeno pro Premier League a Chance Ligu)
-async function smartSyncKurzu() {
+// ⚽ SMART SYNC PLÁNOVAČ: POUZE PRO FOTBAL (S podporou ručního force pingu)
+async function smartSyncKurzu(isForce = false) {
     const nyni = new Date();
     const denVTydnu = nyni.getDay(); // 0 = neděle, 1 = pondělí, 2 = úterý, 3 = středa, 4 = čtvrtek, 5 = pátek, 6 = sobota
 
@@ -437,7 +437,7 @@ async function smartSyncKurzu() {
     const datumStartStr = startBloku.toISOString().split("T")[0];
     const datumKonecStr = konecBloku.toISOString().split("T")[0];
 
-    console.log(`⚽ FOTBAL SYNC: Kontroluji fotbalový blok (${datumStartStr} až ${datumKonecStr})...`);
+    console.log(`⚽ FOTBAL SYNC: Kontroluji fotbalový blok (${datumStartStr} až ${datumKonecStr})${isForce ? " [FORCE OVERRIDE]" : ""}...`);
 
     const dnyKeStazeni = { football: new Set() };
 
@@ -459,7 +459,7 @@ async function smartSyncKurzu() {
 
                 if (!uzMaKurz) {
                     const dayKey = `${sportKlic}_${datumIso}`;
-                    if (!RAM_PROCESSED_ODDS_DAYS.has(dayKey)) {
+                    if (isForce || !RAM_PROCESSED_ODDS_DAYS.has(dayKey)) {
                         dnyKeStazeni[sportKlic].add(datumIso);
                     }
                 }
@@ -474,7 +474,7 @@ async function smartSyncKurzu() {
         return;
     }
 
-    console.log(`🚀 FOTBAL SYNC: Stahuji chybějící kurzy pro ${pocetFotbalDnu} fotbalových dnů.`);
+    console.log(`🚀 FOTBAL SYNC: Stahuji kurzy pro ${pocetFotbalDnu} fotbalových dnů${isForce ? " [FORCE]" : ""}...`);
 
     let celkemNaparovano = 0;
     for (const datum of dnyKeStazeni.football) {
@@ -494,12 +494,12 @@ async function smartSyncKurzu() {
     }
 }
 
-// 🏒 HOKEJ SMART SYNC: PŘÍSNÁ KONTROLA VÝHRADNĚ PRO TIPSPORT EXTRALIGU (V ČASOVÉ ZÓNĚ PRAHA)
-async function smartSyncKurzuHokej() {
+// 🏒 HOKEJ SMART SYNC: PŘÍSNÁ KONTROLA VÝHRADNĚ PRO TIPSPORT EXTRALIGU (S One-Shot zámkem a force možností)
+async function smartSyncKurzuHokej(isForce = false) {
     const nyni = new Date();
     const nowPrague = new Date(nyni.toLocaleString("en-US", { timeZone: "Europe/Prague" }));
 
-    console.log(`🏒 HOKEJ SYNC: Kontroluji zápasy Tipsport Extraligy k datu ${nowPrague.toLocaleDateString("cs-CZ")} ${nowPrague.toLocaleTimeString("cs-CZ")}...`);
+    console.log(`🏒 HOKEJ SYNC: Kontroluji zápasy Tipsport Extraligy k datu ${nowPrague.toLocaleDateString("cs-CZ")} ${nowPrague.toLocaleTimeString("cs-CZ")}${isForce ? " [FORCE OVERRIDE]" : ""}...`);
 
     const dnyKeStazeni = new Set();
     const zapasy = RAM_CENTRAL_MATCHES["Tipsport Extraliga"] || {};
@@ -546,16 +546,20 @@ async function smartSyncKurzuHokej() {
         const uzMaKurz = z.odds || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[z.id] || RAM_CENTRAL_ODDS["Tipsport Extraliga"]?.[datedKey];
 
         if (!uzMaKurz) {
-            dnyKeStazeni.add(datumIso);
+            const dayKey = `ice-hockey_${datumIso}`;
+            // 🛡️ ONE-SHOT GUARD: Automat stáhne den jen jednou. Znovu pouze při explicitním force pingu od admina.
+            if (isForce || !RAM_PROCESSED_ODDS_DAYS.has(dayKey)) {
+                dnyKeStazeni.add(datumIso);
+            }
         }
     });
 
     if (dnyKeStazeni.size === 0) {
-        console.log(`🛡️ HOKEJ SYNC: Všechny aktuální zápasy Extraligy mají kurzy nebo ještě nenastal jejich termín. Přeskakuji API.`);
+        console.log(`🛡️ HOKEJ SYNC: Všechny aktuální zápasy Extraligy mají kurzy nebo již byly z API staženy. Přeskakuji API (0 requestů).`);
         return;
     }
 
-    console.log(`🚀 HOKEJ SYNC: Stahuji kurzy pro ${dnyKeStazeni.size} hokejových dnů (${Array.from(dnyKeStazeni).join(", ")})...`);
+    console.log(`🚀 HOKEJ SYNC: Stahuji kurzy pro ${dnyKeStazeni.size} hokejových dnů (${Array.from(dnyKeStazeni).join(", ")})${isForce ? " [FORCE]" : ""}...`);
 
     let celkemNaparovano = 0;
     for (const datum of dnyKeStazeni) {
@@ -5035,19 +5039,21 @@ async function startEnterpriseApplication() {
 
         // 🏒 HOKEJ MUSÍ BÝT PRVNÍ: Jinak ho spolkne fotbalový prefix "/sync-odds"!
         if (url === "/sync-odds-hockey" || url.startsWith("/sync-odds-hockey")) {
-            console.log(`🏒 SERVISNÍ PING (/sync-odds-hockey): Spouštím Smart Sync hokejových kurzů...`);
-            smartSyncKurzuHokej().catch(err => console.error("❌ Chyba synchronizace hokejových kurzů:", err));
+            const isForce = urlObj.searchParams.get("force") === "true";
+            console.log(`🏒 SERVISNÍ PING (/sync-odds-hockey${isForce ? "?force=true" : ""}): Spouštím Smart Sync hokejových kurzů...`);
+            smartSyncKurzuHokej(isForce).catch(err => console.error("❌ Chyba synchronizace hokejových kurzů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Smart Sync hokejových kurzů spuštěn.");
+            res.end(`OK - Smart Sync hokejových kurzů spuštěn${isForce ? " (vynucený re-sync)" : ""}.`);
             return;
         }
 
         // ⚽ FOTBAL: Zpracuje se pouze čistý "/sync-odds"
         if (url === "/sync-odds" || url.startsWith("/sync-odds?") || url.startsWith("/sync-odds/")) {
-            console.log(`📊 SERVISNÍ PING (/sync-odds): Spouštím Smart Sync fotbalových kurzů...`);
-            smartSyncKurzu().catch(err => console.error("❌ Chyba synchronizace fotbalových kurzů:", err));
+            const isForce = urlObj.searchParams.get("force") === "true";
+            console.log(`📊 SERVISNÍ PING (/sync-odds${isForce ? "?force=true" : ""}): Spouštím Smart Sync fotbalových kurzů...`);
+            smartSyncKurzu(isForce).catch(err => console.error("❌ Chyba synchronizace fotbalových kurzů:", err));
             res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK - Smart Sync fotbalových kurzů spuštěn.");
+            res.end(`OK - Smart Sync fotbalových kurzů spuštěn${isForce ? " (vynucený re-sync)" : ""}.`);
             return;
         }
 
