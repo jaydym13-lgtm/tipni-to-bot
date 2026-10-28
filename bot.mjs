@@ -20,7 +20,7 @@ const SOFASCORE_TOURNAMENTS = {
     "Premier League": { id: 1, seasonId: 96668, sport: "football", isUnique: false },
     "Tipsport Extraliga": { id: 109, seasonId: 96126, sport: "ice-hockey", isUnique: false },
     "Liga mistrů": { id: 7, seasonId: 96518, sport: "football", isUnique: true },
-    "MS v hokeji": { id: 248, seasonId: 96750, sport: "ice-hockey", isUnique: true },
+    "MS v hokeji": { id: 3, seasonId: 81043, sport: "ice-hockey", isUnique: true },
     "MS ve fotbale": { id: 16, seasonId: 96680, sport: "football", isUnique: true }
 };
 
@@ -5409,16 +5409,17 @@ function spoctiPoharovaPasma(N) {
         };
     }
 
-    // Určení cílové hlavní fáze M (8 pro do 15 hráčů, 16 pro 16-32 hráčů, 32 pro > 32 hráčů)
+    // 🎯 DYNAMICKÝ CÍL: Ligy do 21 hráčů (Premier League s 20 lidmi) cílí na Čtvrtfinále (M = 8),
+    // větší ligy od 22 hráčů (Chance Liga s 25 lidmi) cílí na plné Osmifinále (M = 16).
     let M = 16;
-    if (N <= 15) M = 8;
+    if (N <= 21) M = 8;
     else if (N <= 32) M = 16;
     else M = 32;
 
-    const minD = 2 * M - N + 1;
+    const minD = Math.max(2, 2 * M - N + 1);
     const maxD = Math.floor((4 * M - N - 1) / 3);
 
-    // Pokud je rozsah platný, vybereme vyvážený počet Double Byes (ideální střed rozptylu)
+    // Pokud je rozsah platný, vybereme vyvážený počet Double Byes (ideální střed rozptylu s garancí TOP 2)
     if (minD <= maxD) {
         const idealD = Math.floor((5 * M - 2 * N) / 3);
         const D = Math.max(minD, Math.min(maxD, idealD));
@@ -5438,7 +5439,7 @@ function spoctiPoharovaPasma(N) {
     }
 
     // Fallback na 2 pásma (pokud N neumožňuje 3 plnohodnotná patra)
-    const dByes = 2 * M - N;
+    const dByes = Math.max(2, 2 * M - N);
     const pk = 2 * (N - M);
     return {
         isTwoTier: true,
@@ -5457,9 +5458,9 @@ function spoctiRozvrhPlayoff(targetM, hasP1, hasP2) {
         return {
             final: 30,
             sf: [28, 29],
-            qf: [26, 27],
-            predkolo2: hasP2 ? [24, 25] : null,
-            predkolo1: hasP1 ? [22, 23] : null,
+            qf: [25, 26],
+            predkolo2: hasP2 ? [22, 23] : null,
+            predkolo1: hasP1 ? [20, 21] : null,
             of: null,
             r32: null
         };
@@ -5820,10 +5821,20 @@ function sestavElastickePlayoff(leagueName, arenaList, pasma, matchesList) {
 
     const qfDuels = [];
     if (schedule.qf) {
-        for (let i = 0; i < 4; i++) {
-            const p1 = qfField[i * 2] || null;
-            const p2 = qfField[i * 2 + 1] || null;
-            qfDuels.push(buildDuel(p1, p2, schedule.qf[0], schedule.qf[1], `Čtvrtfinále • Duel ${i + 1}`));
+        // 🎾 GRAND SLAM PÁROVÁNÍ PRO M = 8: Garantuje, že 1. a 2. král z Arény nehrají proti sobě, ale mohou se potkat až ve finále!
+        if (pasma.targetM === 8) {
+            const pairings8 = [[0, 7], [3, 4], [1, 6], [2, 5]];
+            pairings8.forEach((pair, idx) => {
+                const p1 = qfField[pair[0]] || null;
+                const p2 = qfField[pair[1]] || null;
+                qfDuels.push(buildDuel(p1, p2, schedule.qf[0], schedule.qf[1], `Čtvrtfinále • Duel ${idx + 1}`));
+            });
+        } else {
+            for (let i = 0; i < 4; i++) {
+                const p1 = qfField[i * 2] || null;
+                const p2 = qfField[i * 2 + 1] || null;
+                qfDuels.push(buildDuel(p1, p2, schedule.qf[0], schedule.qf[1], `Čtvrtfinále • Duel ${i + 1}`));
+            }
         }
         rounds.push({
             name: `👑 ČTVRTFINÁLE (${schedule.qf[0]}. & ${schedule.qf[1]}. KOLO)`,
