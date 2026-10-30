@@ -4978,7 +4978,7 @@ async function startEnterpriseApplication() {
 
         // 🔒 AUTORIZACE POŽADAVKŮ: Ochrana privátních endpointů tokenem (hlavička x-bot-secret nebo ?key=...)
         const incomingSecret = req.headers["x-bot-secret"] || urlObj.searchParams.get("key");
-        const isPublicRoute = (pathname === "/" || pathname === "/cron");
+        const isPublicRoute = (pathname === "/");
 
         if (!isPublicRoute && BOT_SECRET && incomingSecret !== BOT_SECRET) {
             console.warn(`🛑 NEOPRÁVNĚNÝ PŘÍSTUP [${req.method} ${pathname}]: Chybí nebo nesouhlasí x-bot-secret!`);
